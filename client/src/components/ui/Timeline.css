@@ -1,0 +1,56 @@
+.Timeline {
+  list-style: none;
+  padding-left: 1.25rem;
+}
+
+.Timeline-item {
+  display: flex;
+  position: relative;
+}
+
+.Timeline-time {
+  background-color: rgb(var(--border-rgb) / 0.25);
+  border-bottom-left-radius: var(--border-radius);
+  border-top-left-radius: var(--border-radius);
+  font-size: 12px;
+  left: -100px;
+  overflow: hidden;
+  padding: 0.3rem 0.6rem;
+  position: absolute;
+  text-align: center;
+  text-overflow: ellipsis;
+  top: -2px;
+  white-space: nowrap;
+  width: 100px;
+}
+
+.Timeline-content {
+  border-left: 2px solid rgb(var(--border-rgb));
+  padding-bottom: 1.25rem;
+  padding-left: 1.25rem;
+  position: relative;
+
+  &::before {
+    background-color: rgb(var(--background-rgb));
+    border: 2px solid rgb(var(--border-rgb));
+    border-radius: 50%;
+    content: "";
+    height: 10px;
+    left: -8px;
+    position: absolute;
+    top: 3px;
+    width: 10px;
+  }
+}
+
+.Timeline-label {
+  font-weight: 500;
+  margin-bottom: 0.6rem;
+}
+
+.Timeline-details {
+  background-color: rgb(var(--background-rgb));
+  border-radius: var(--border-radius);
+  box-shadow: var(--box-shadow);
+  padding: 0.6rem;
+}

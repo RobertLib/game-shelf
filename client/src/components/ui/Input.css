@@ -1,0 +1,13 @@
+.Input-label {
+  display: inline-block;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.Input-container {
+  display: flex;
+}
+
+.Input-error {
+  margin-top: 0.25rem;
+}

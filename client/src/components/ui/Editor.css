@@ -1,0 +1,23 @@
+.Editor-label {
+  display: inline-block;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.Editor-toolbar {
+  margin-bottom: 0.5rem;
+
+  button {
+    margin-right: 0.25rem;
+  }
+}
+
+.Editor-content {
+  border: 1px solid rgb(var(--border-rgb));
+  min-height: 200px;
+  padding: 0.5rem;
+}
+
+.Editor-error {
+  margin-top: 0.25rem;
+}

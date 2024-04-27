@@ -1,0 +1,61 @@
+.DataTable-toolbar {
+  background-color: rgb(var(--background-rgb));
+  left: 0;
+  padding: 0.5rem;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.DataTable-head {
+  background-color: rgb(var(--background-rgb));
+  position: sticky;
+  top: 0;
+  z-index: 1;
+
+  &::after {
+    background-color: rgb(var(--border-rgb));
+    bottom: 0;
+    content: "";
+    height: 1px;
+    left: 0;
+    position: absolute;
+    right: 0;
+  }
+}
+
+.DataTable-actions {
+  background-color: rgb(var(--background-rgb));
+  left: 0;
+  position: sticky;
+
+  &::after {
+    background-color: rgb(var(--border-rgb));
+    bottom: 0;
+    content: "";
+    position: absolute;
+    right: -1px;
+    top: 0;
+    width: 1px;
+  }
+}
+
+.DataTable-head-cell {
+  align-items: start;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.DataTable-sort-btn {
+  gap: 0.25rem;
+  padding: 0;
+}
+
+.DataTable-footer {
+  align-items: center;
+  display: flex;
+  gap: 1rem;
+  justify-content: end;
+  margin-top: 0.2rem;
+}

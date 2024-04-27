@@ -1,0 +1,9 @@
+.Textarea-label {
+  display: inline-block;
+  font-weight: 500;
+  margin-bottom: 0.5rem;
+}
+
+.Textarea-error {
+  margin-top: 0.25rem;
+}
