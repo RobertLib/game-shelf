@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Debug-only overlay: the development API runs on the local network (10.0.2.2 / localhost). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Android 17+ blocks traffic to local-network addresses without this runtime permission. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
+    <application android:networkSecurityConfig="@xml/network_security_config" />
+</manifest>

@@ -1,0 +1,21 @@
+/**
+ * Machine-readable error codes returned in the `code` field of every error
+ * response. Clients should branch on these, never on `message`.
+ */
+export const ErrorCode = {
+  VALIDATION_FAILED: 'VALIDATION_FAILED',
+  UNAUTHORIZED: 'UNAUTHORIZED',
+  INVALID_CREDENTIALS: 'INVALID_CREDENTIALS',
+  INVALID_REFRESH_TOKEN: 'INVALID_REFRESH_TOKEN',
+  INVALID_CURRENT_PASSWORD: 'INVALID_CURRENT_PASSWORD',
+  EMAIL_ALREADY_REGISTERED: 'EMAIL_ALREADY_REGISTERED',
+  GAME_NOT_FOUND: 'GAME_NOT_FOUND',
+  NOT_FOUND: 'NOT_FOUND',
+  TOO_MANY_REQUESTS: 'TOO_MANY_REQUESTS',
+  BAD_REQUEST: 'BAD_REQUEST',
+  FORBIDDEN: 'FORBIDDEN',
+  CONFLICT: 'CONFLICT',
+  INTERNAL_ERROR: 'INTERNAL_ERROR',
+} as const;
+
+export type ErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode];

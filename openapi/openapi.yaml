@@ -1,0 +1,1294 @@
+openapi: 3.0.0
+paths:
+  /api/v1/health:
+    get:
+      operationId: getHealth
+      parameters: []
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+      summary: Liveness probe
+      tags:
+        - health
+  /api/v1/auth/register:
+    post:
+      operationId: register
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterRequest"
+      responses:
+        "201":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict with existing data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      summary: Create an account and sign in
+      tags:
+        - auth
+  /api/v1/auth/login:
+    post:
+      operationId: login
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      summary: Sign in with e-mail and password
+      tags:
+        - auth
+  /api/v1/auth/refresh:
+    post:
+      operationId: refreshTokens
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      summary: Exchange a refresh token for a new token pair
+      tags:
+        - auth
+  /api/v1/auth/logout:
+    post:
+      operationId: logout
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefreshTokenRequest"
+      responses:
+        "204":
+          description: ""
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      summary: Revoke a refresh token
+      tags:
+        - auth
+  /api/v1/auth/me:
+    get:
+      operationId: getCurrentUser
+      parameters: []
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Profile of the signed-in user
+      tags:
+        - auth
+    delete:
+      operationId: deleteAccount
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteAccountRequest"
+      responses:
+        "204":
+          description: ""
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Delete the account and the whole collection
+      tags:
+        - auth
+  /api/v1/auth/change-password:
+    post:
+      description: Signs out all sessions (every refresh token is revoked) and returns
+        a new token pair for the current device. Fails with
+        `INVALID_CURRENT_PASSWORD` when the current password is wrong.
+      operationId: changePassword
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Change password
+      tags:
+        - auth
+  /api/v1/games:
+    get:
+      operationId: listGames
+      parameters:
+        - name: q
+          required: false
+          in: query
+          description: Full-text search in title, edition, developer, publisher, genre,
+            product code, barcode and notes. Every whitespace-separated word
+            must match (case-insensitive).
+          schema:
+            example: zelda ocarina
+            type: string
+        - name: platform
+          required: false
+          in: query
+          description: Platforms. Repeat the parameter or separate values with commas;
+            values are OR-ed.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/Platform"
+        - name: status
+          required: false
+          in: query
+          description: Collection statuses. Repeat the parameter or separate values with
+            commas; values are OR-ed.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/CollectionStatus"
+        - name: format
+          required: false
+          in: query
+          description: Formats. Repeat the parameter or separate values with commas;
+            values are OR-ed.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/GameFormat"
+        - name: region
+          required: false
+          in: query
+          description: Regions. Repeat the parameter or separate values with commas;
+            values are OR-ed.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/Region"
+        - name: completeness
+          required: false
+          in: query
+          description: Completeness levels. Repeat the parameter or separate values with
+            commas; values are OR-ed.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/Completeness"
+        - name: condition
+          required: false
+          in: query
+          description: Conditions. Repeat the parameter or separate values with commas;
+            values are OR-ed.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/Condition"
+        - name: playStatus
+          required: false
+          in: query
+          description: Play statuses. Repeat the parameter or separate values with commas;
+            values are OR-ed.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/PlayStatus"
+        - name: genre
+          required: false
+          in: query
+          description: Exact genres (case-insensitive). Repeat the parameter or separate
+            values with commas; values are OR-ed.
+          schema:
+            type: array
+            items:
+              type: string
+        - name: publisher
+          required: false
+          in: query
+          description: Publisher contains (case-insensitive).
+          schema:
+            type: string
+        - name: developer
+          required: false
+          in: query
+          description: Developer contains (case-insensitive).
+          schema:
+            type: string
+        - name: storageLocation
+          required: false
+          in: query
+          description: Storage location contains (case-insensitive).
+          schema:
+            type: string
+        - name: favorite
+          required: false
+          in: query
+          description: Only favourites (true) or only non-favourites (false).
+          schema:
+            type: boolean
+        - name: hasCover
+          required: false
+          in: query
+          description: Only games with (true) or without (false) a cover image.
+          schema:
+            type: boolean
+        - name: releaseYearFrom
+          required: false
+          in: query
+          schema:
+            minimum: 1950
+            maximum: 2100
+            type: integer
+        - name: releaseYearTo
+          required: false
+          in: query
+          schema:
+            minimum: 1950
+            maximum: 2100
+            type: integer
+        - name: purchaseDateFrom
+          required: false
+          in: query
+          schema:
+            format: date
+            example: 2024-01-01
+            type: string
+        - name: purchaseDateTo
+          required: false
+          in: query
+          schema:
+            format: date
+            example: 2024-12-31
+            type: string
+        - name: purchasePriceMin
+          required: false
+          in: query
+          schema:
+            minimum: 0
+            type: number
+        - name: purchasePriceMax
+          required: false
+          in: query
+          schema:
+            minimum: 0
+            type: number
+        - name: estimatedValueMin
+          required: false
+          in: query
+          schema:
+            minimum: 0
+            type: number
+        - name: estimatedValueMax
+          required: false
+          in: query
+          schema:
+            minimum: 0
+            type: number
+        - name: ratingMin
+          required: false
+          in: query
+          schema:
+            minimum: 1
+            maximum: 10
+            type: integer
+        - name: ratingMax
+          required: false
+          in: query
+          schema:
+            minimum: 1
+            maximum: 10
+            type: integer
+        - name: sort
+          required: false
+          in: query
+          description: Games without a value in the sorted field always come last.
+            `platform` sorts by manufacturer and generation (the order of the
+            Platform enum), not alphabetically.
+          schema:
+            $ref: "#/components/schemas/GameSortField"
+        - name: order
+          required: false
+          in: query
+          schema:
+            $ref: "#/components/schemas/SortOrder"
+        - name: page
+          required: false
+          in: query
+          schema:
+            minimum: 1
+            default: 1
+            type: integer
+        - name: pageSize
+          required: false
+          in: query
+          schema:
+            minimum: 1
+            maximum: 100
+            default: 25
+            type: integer
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GamePage"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: List the collection with filtering, sorting and pagination
+      tags:
+        - games
+    post:
+      operationId: createGame
+      parameters: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveGameRequest"
+      responses:
+        "201":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Game"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Add a game to the collection
+      tags:
+        - games
+  /api/v1/games/facets:
+    get:
+      operationId: getGameFacets
+      parameters: []
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GameFacets"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Distinct values in the collection for building filters
+      tags:
+        - games
+  /api/v1/games/{id}:
+    get:
+      operationId: getGame
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Game"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Get one game
+      tags:
+        - games
+    put:
+      description: "Full replacement: omitted optional fields are cleared, omitted
+        defaults are reset."
+      operationId: updateGame
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveGameRequest"
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Game"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Replace a game
+      tags:
+        - games
+    delete:
+      operationId: deleteGame
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            format: uuid
+            type: string
+      responses:
+        "204":
+          description: ""
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Remove a game from the collection
+      tags:
+        - games
+info:
+  title: Game Shelf API
+  description: >-
+    REST API of Game Shelf – a catalogue for collectors of computer and console
+    games.
+
+
+    Authenticate with `POST /api/v1/auth/login` or `/register` and send the
+    access token as `Authorization: Bearer <token>`. When it expires (401),
+    exchange the refresh token at `POST /api/v1/auth/refresh`.
+
+
+    Every error has the shape of `ErrorResponse`; branch on its `code`.
+  version: 1.0.0
+  contact: {}
+tags: []
+servers: []
+components:
+  securitySchemes:
+    bearer:
+      scheme: bearer
+      bearerFormat: JWT
+      type: http
+  schemas:
+    RegisterRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: collector@example.com
+        password:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+          example: super-secret-123
+        displayName:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Retro Rob
+      required:
+        - email
+        - password
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+          example: collector@example.com
+        displayName:
+          type: string
+          nullable: true
+          example: Retro Rob
+        createdAt:
+          format: date-time
+          type: string
+      required:
+        - id
+        - email
+        - displayName
+        - createdAt
+    AuthResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+          description: "Short-lived JWT for the `Authorization: Bearer` header."
+        expiresIn:
+          type: integer
+          description: Expiry of the access token in seconds.
+          example: 900
+        refreshToken:
+          type: string
+          description: Opaque single-use token for POST /auth/refresh. Every refresh
+            returns a new one; reusing an old token revokes all sessions of the
+            user.
+        user:
+          $ref: "#/components/schemas/User"
+      required:
+        - accessToken
+        - expiresIn
+        - refreshToken
+        - user
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_FAILED
+        - UNAUTHORIZED
+        - INVALID_CREDENTIALS
+        - INVALID_REFRESH_TOKEN
+        - INVALID_CURRENT_PASSWORD
+        - EMAIL_ALREADY_REGISTERED
+        - GAME_NOT_FOUND
+        - NOT_FOUND
+        - TOO_MANY_REQUESTS
+        - BAD_REQUEST
+        - FORBIDDEN
+        - CONFLICT
+        - INTERNAL_ERROR
+    ErrorResponse:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+          example: 400
+        code:
+          allOf:
+            - $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          example: Validation failed
+        details:
+          description: Individual validation messages, present for VALIDATION_FAILED.
+          example:
+            - email must be an email
+          type: array
+          items:
+            type: string
+      required:
+        - statusCode
+        - code
+        - message
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+          example: collector@example.com
+        password:
+          type: string
+          format: password
+          example: super-secret-123
+      required:
+        - email
+        - password
+    RefreshTokenRequest:
+      type: object
+      properties:
+        refreshToken:
+          type: string
+      required:
+        - refreshToken
+    ChangePasswordRequest:
+      type: object
+      properties:
+        currentPassword:
+          type: string
+          format: password
+        newPassword:
+          type: string
+          format: password
+          minLength: 8
+          maxLength: 128
+      required:
+        - currentPassword
+        - newPassword
+    DeleteAccountRequest:
+      type: object
+      properties:
+        password:
+          type: string
+          format: password
+          description: Current password as a confirmation.
+      required:
+        - password
+    Platform:
+      type: string
+      enum:
+        - PC
+        - MAC
+        - PS1
+        - PS2
+        - PS3
+        - PS4
+        - PS5
+        - PSP
+        - PS_VITA
+        - XBOX
+        - XBOX_360
+        - XBOX_ONE
+        - XBOX_SERIES
+        - NES
+        - SNES
+        - N64
+        - GAMECUBE
+        - WII
+        - WII_U
+        - SWITCH
+        - SWITCH_2
+        - GAME_BOY
+        - GAME_BOY_COLOR
+        - GAME_BOY_ADVANCE
+        - NINTENDO_DS
+        - NINTENDO_3DS
+        - VIRTUAL_BOY
+        - MASTER_SYSTEM
+        - MEGA_DRIVE
+        - MEGA_CD
+        - SEGA_32X
+        - SATURN
+        - DREAMCAST
+        - GAME_GEAR
+        - ATARI_2600
+        - ATARI_7800
+        - ATARI_LYNX
+        - ATARI_JAGUAR
+        - NEO_GEO
+        - NEO_GEO_POCKET
+        - PC_ENGINE
+        - THREE_DO
+        - ZX_SPECTRUM
+        - COMMODORE_64
+        - AMIGA
+        - AMSTRAD_CPC
+        - ATARI_8BIT
+        - ATARI_ST
+        - MSX
+        - OTHER
+    CollectionStatus:
+      type: string
+      enum:
+        - OWNED
+        - WISHLIST
+        - PREORDERED
+        - LENT
+        - FOR_SALE
+        - SOLD
+    GameFormat:
+      type: string
+      enum:
+        - PHYSICAL
+        - DIGITAL
+    Region:
+      type: string
+      enum:
+        - PAL
+        - NTSC_U
+        - NTSC_J
+        - REGION_FREE
+        - OTHER
+    Completeness:
+      type: string
+      enum:
+        - SEALED
+        - CIB
+        - GAME_AND_BOX
+        - GAME_AND_MANUAL
+        - LOOSE
+        - BOX_ONLY
+    Condition:
+      type: string
+      enum:
+        - MINT
+        - NEAR_MINT
+        - VERY_GOOD
+        - GOOD
+        - FAIR
+        - POOR
+    PlayStatus:
+      type: string
+      enum:
+        - UNPLAYED
+        - PLAYING
+        - COMPLETED
+        - ABANDONED
+    GameSortField:
+      type: string
+      enum:
+        - title
+        - platform
+        - releaseYear
+        - purchaseDate
+        - purchasePrice
+        - estimatedValue
+        - rating
+        - createdAt
+        - updatedAt
+    SortOrder:
+      type: string
+      enum:
+        - asc
+        - desc
+    Game:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        platform:
+          allOf:
+            - $ref: "#/components/schemas/Platform"
+        status:
+          allOf:
+            - $ref: "#/components/schemas/CollectionStatus"
+        format:
+          allOf:
+            - $ref: "#/components/schemas/GameFormat"
+        region:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Region"
+        edition:
+          type: string
+          nullable: true
+        completeness:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Completeness"
+        condition:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Condition"
+        playStatus:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PlayStatus"
+        genre:
+          type: string
+          nullable: true
+        developer:
+          type: string
+          nullable: true
+        publisher:
+          type: string
+          nullable: true
+        releaseYear:
+          type: integer
+          nullable: true
+        barcode:
+          type: string
+          nullable: true
+        productCode:
+          type: string
+          nullable: true
+        quantity:
+          type: integer
+        purchasePrice:
+          type: number
+          nullable: true
+        purchaseDate:
+          type: string
+          format: date
+          nullable: true
+          example: 2024-05-17
+        purchasePlace:
+          type: string
+          nullable: true
+        estimatedValue:
+          type: number
+          nullable: true
+        currency:
+          type: string
+          example: CZK
+        storageLocation:
+          type: string
+          nullable: true
+        rating:
+          type: integer
+          nullable: true
+        favorite:
+          type: boolean
+        coverImageUrl:
+          type: string
+          format: uri
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+        createdAt:
+          format: date-time
+          type: string
+        updatedAt:
+          format: date-time
+          type: string
+      required:
+        - id
+        - title
+        - platform
+        - status
+        - format
+        - region
+        - edition
+        - completeness
+        - condition
+        - playStatus
+        - genre
+        - developer
+        - publisher
+        - releaseYear
+        - barcode
+        - productCode
+        - quantity
+        - purchasePrice
+        - purchaseDate
+        - purchasePlace
+        - estimatedValue
+        - currency
+        - storageLocation
+        - rating
+        - favorite
+        - coverImageUrl
+        - notes
+        - createdAt
+        - updatedAt
+    GamePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Game"
+        page:
+          type: integer
+          example: 1
+        pageSize:
+          type: integer
+          example: 25
+        totalItems:
+          type: integer
+          description: Number of games matching the filters.
+          example: 132
+        totalPages:
+          type: integer
+          example: 6
+      required:
+        - items
+        - page
+        - pageSize
+        - totalItems
+        - totalPages
+    FacetValue:
+      type: object
+      properties:
+        value:
+          type: string
+          example: PS2
+        count:
+          type: integer
+          example: 42
+      required:
+        - value
+        - count
+    GameFacets:
+      type: object
+      properties:
+        totalItems:
+          type: integer
+          description: Number of records in the collection.
+        platforms:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacetValue"
+        statuses:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacetValue"
+        genres:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacetValue"
+        publishers:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacetValue"
+        developers:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacetValue"
+        storageLocations:
+          type: array
+          items:
+            $ref: "#/components/schemas/FacetValue"
+        releaseYearMin:
+          type: integer
+          nullable: true
+        releaseYearMax:
+          type: integer
+          nullable: true
+      required:
+        - totalItems
+        - platforms
+        - statuses
+        - genres
+        - publishers
+        - developers
+        - storageLocations
+        - releaseYearMin
+        - releaseYearMax
+    SaveGameRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          example: "The Legend of Zelda: Ocarina of Time"
+        platform:
+          example: N64
+          allOf:
+            - $ref: "#/components/schemas/Platform"
+        status:
+          default: OWNED
+          allOf:
+            - $ref: "#/components/schemas/CollectionStatus"
+        format:
+          default: PHYSICAL
+          allOf:
+            - $ref: "#/components/schemas/GameFormat"
+        region:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Region"
+        edition:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Collector's Edition
+        completeness:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Completeness"
+        condition:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Condition"
+        playStatus:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PlayStatus"
+        genre:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Action-adventure
+        developer:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Nintendo EAD
+        publisher:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Nintendo
+        releaseYear:
+          type: integer
+          nullable: true
+          minimum: 1950
+          maximum: 2100
+          example: 1998
+        barcode:
+          type: string
+          nullable: true
+          pattern: ^[0-9]{8,14}$
+          description: EAN / UPC (8–14 digits).
+          example: "045496870058"
+        productCode:
+          type: string
+          nullable: true
+          maxLength: 50
+          description: Catalogue / serial number from the media or spine.
+          example: NUS-NZLP-EUR
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 999
+          default: 1
+        purchasePrice:
+          type: number
+          nullable: true
+          minimum: 0
+          example: 1299.9
+        purchaseDate:
+          type: string
+          format: date
+          nullable: true
+          example: 2024-05-17
+        purchasePlace:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Flea market
+        estimatedValue:
+          type: number
+          nullable: true
+          minimum: 0
+          example: 2500
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          default: CZK
+          description: ISO 4217 currency of purchasePrice and estimatedValue.
+          example: CZK
+        storageLocation:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Shelf A, row 3
+        rating:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 10
+          example: 9
+        favorite:
+          type: boolean
+          default: false
+        coverImageUrl:
+          type: string
+          format: uri
+          nullable: true
+          maxLength: 2048
+        notes:
+          type: string
+          nullable: true
+          maxLength: 5000
+      required:
+        - title
+        - platform
