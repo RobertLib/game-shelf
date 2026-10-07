@@ -6,6 +6,7 @@ import cz.gameshelf.app.domain.model.GameFilter
 import cz.gameshelf.app.domain.model.GameQuery
 import cz.gameshelf.app.domain.model.GameSort
 import cz.gameshelf.app.domain.model.GameSortField
+import cz.gameshelf.app.domain.model.PlatformSection
 import cz.gameshelf.app.domain.model.SortOrder
 import java.text.CollationKey
 import java.text.Collator
@@ -47,6 +48,19 @@ object GameQueryEngine {
         }
         val comparator = primary?.then(byTitle) ?: byTitle.directed(sort.order)
         return rows.sortedWith(comparator.then(byId)).map { it.game }
+    }
+
+    /**
+     * Splits [games], already sorted by [sort], into one section per platform. Sections follow the
+     * platform order (manufacturer and generation), reversed when sorted by platform descending;
+     * games keep their order within a section.
+     */
+    fun groupByPlatform(games: List<Game>, sort: GameSort): List<PlatformSection> {
+        val sections = games.groupBy { it.platform }
+            .map { (platform, platformGames) -> PlatformSection(platform, platformGames) }
+            .sortedBy { it.platform.ordinal }
+        val descending = sort.field == GameSortField.PLATFORM && sort.order == SortOrder.DESC
+        return if (descending) sections.reversed() else sections
     }
 
     /** Every search word must be contained in at least one of the searchable texts. */

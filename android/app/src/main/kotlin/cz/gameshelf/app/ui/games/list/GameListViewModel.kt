@@ -18,6 +18,7 @@ import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.domain.model.GameFilter
 import cz.gameshelf.app.domain.model.GameQuery
 import cz.gameshelf.app.domain.model.GameSortField
+import cz.gameshelf.app.domain.model.PlatformSection
 import cz.gameshelf.app.domain.model.SortOrder
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.appContainer
@@ -43,9 +44,10 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Collection list computed from the games stored on the device: debounced search, filters and sort
- * (kept here so they survive navigating to a detail and back) applied to the local collection, which
- * updates by itself whenever a local change or a sync changes it. Pull-to-refresh runs a sync.
+ * Collection list computed from the games stored on the device: debounced search, filters, sort and
+ * grouping by platform (kept here so they survive navigating to a detail and back) applied to the
+ * local collection, which updates by itself whenever a local change or a sync changes it.
+ * Pull-to-refresh runs a sync.
  */
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class GameListViewModel(
@@ -69,22 +71,25 @@ class GameListViewModel(
             .debounce { if (it.isBlank()) 0L else searchDebounceMillis }
             .map { it.trim() }
             .distinctUntilChanged()
-        val query = combine(
+        val request = combine(
             debouncedSearch,
             _uiState.map { it.filter }.distinctUntilChanged(),
             _uiState.map { it.sort }.distinctUntilChanged(),
-            ::GameQuery,
-        ).distinctUntilChanged()
+            _uiState.map { it.groupByPlatform }.distinctUntilChanged(),
+        ) { search, filter, sort, groupByPlatform -> ListRequest(GameQuery(search, filter, sort), groupByPlatform) }
+            .distinctUntilChanged()
 
         viewModelScope.launch {
-            var shownQuery: GameQuery? = null
-            combine(repository.games, query, ::Pair)
-                .mapLatest { (games, query) -> QueryResult(query, GameQueryEngine.run(games, query), games.size) }
+            var shownRequest: ListRequest? = null
+            combine(repository.games, request, ::Pair)
+                .mapLatest { (games, request) -> ListResult.of(games, request) }
                 .flowOn(computeDispatcher)
                 .collect { result ->
-                    _uiState.update { it.copy(games = result.games, collectionSize = result.collectionSize) }
-                    if (shownQuery != null && shownQuery != result.query) _events.send(GameListEvent.ScrollToTop)
-                    shownQuery = result.query
+                    _uiState.update {
+                        it.copy(games = result.games, sections = result.sections, collectionSize = result.collectionSize)
+                    }
+                    if (shownRequest != null && shownRequest != result.request) _events.send(GameListEvent.ScrollToTop)
+                    shownRequest = result.request
                 }
         }
         viewModelScope.launch {
@@ -141,6 +146,8 @@ class GameListViewModel(
 
     fun setSortOrder(order: SortOrder) = _uiState.update { it.copy(sort = it.sort.copy(order = order)) }
 
+    fun setGroupByPlatform(enabled: Boolean) = _uiState.update { it.copy(groupByPlatform = enabled) }
+
     fun removeFilter(filter: ActiveFilter) = _uiState.update { it.copy(filter = it.filter.without(filter)) }
 
     fun clearFilters() = _uiState.update { it.copy(filter = GameFilter()) }
@@ -174,7 +181,27 @@ class GameListViewModel(
         _events.trySend(GameListEvent.ShowMessage(UiText(message)))
     }
 
-    private class QueryResult(val query: GameQuery, val games: List<Game>, val collectionSize: Int)
+    /** Everything the shown list is computed from, apart from the collection itself. */
+    private data class ListRequest(val query: GameQuery, val groupByPlatform: Boolean)
+
+    private class ListResult(
+        val request: ListRequest,
+        val games: List<Game>,
+        val sections: List<PlatformSection>?,
+        val collectionSize: Int,
+    ) {
+        companion object {
+            fun of(collection: List<Game>, request: ListRequest): ListResult {
+                val games = GameQueryEngine.run(collection, request.query)
+                val sections = if (request.groupByPlatform) {
+                    GameQueryEngine.groupByPlatform(games, request.query.sort)
+                } else {
+                    null
+                }
+                return ListResult(request, games, sections, collection.size)
+            }
+        }
+    }
 
     companion object {
         const val SEARCH_DEBOUNCE_MILLIS = 350L

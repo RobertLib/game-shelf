@@ -72,6 +72,7 @@
     <string name="sort_header">Sort by</string>
     <string name="sort_ascending">Ascending</string>
     <string name="sort_descending">Descending</string>
+    <string name="sort_group_by_platform">Group by platform</string>
     <string name="filters_clear_all">Clear all</string>
     <string name="filter_remove">Remove filter</string>
     <string name="empty_collection_title">Your collection is empty</string>

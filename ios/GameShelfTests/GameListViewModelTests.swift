@@ -66,6 +66,21 @@ struct GameListViewModelTests {
         #expect(model.games.map(\.title) == ["Zelda", "Super Mario World", "Banjo-Kazooie"])
     }
 
+    @Test func groupsByPlatformUntilGroupingIsTurnedOff() async throws {
+        let server = FakeGameServer()
+        await server.seed(Fixtures.game("Super Mario World", .snes))
+        await server.seed(Fixtures.game("Doom", .pc))
+        await server.seed(Fixtures.game("Banjo-Kazooie", .snes))
+        let model = try await makeModel(server: server)
+        #expect(model.sections?.map(\.platform) == [.pc, .snes])
+        #expect(model.sections?.last?.games.map(\.title) == ["Banjo-Kazooie", "Super Mario World"])
+
+        model.setGroupByPlatform(false)
+        await model.updateResults()
+        #expect(model.sections == nil)
+        #expect(model.games.map(\.title) == ["Banjo-Kazooie", "Doom", "Super Mario World"])
+    }
+
     @Test func emptyCollectionAndNoResultsAreDistinguished() async throws {
         let model = try await makeModel(server: FakeGameServer())
         #expect(model.isCollectionEmpty)

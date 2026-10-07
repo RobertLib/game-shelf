@@ -14,6 +14,29 @@ extension GameListQuery {
     }
 }
 
+// MARK: - Grouping
+
+/// The games of one platform, a section of the collection list grouped by platform.
+struct PlatformSection: Identifiable, Hashable, Sendable {
+    let platform: Platform
+    let games: [Game]
+
+    var id: Platform { platform }
+}
+
+extension GameListQuery {
+    /// `results`, already in the order of this query, split into one section per platform.
+    /// Sections follow the platform order (manufacturer and generation), reversed when sorted by
+    /// platform descending; games keep their order within a section.
+    func sections(of results: [Game]) -> [PlatformSection] {
+        let gamesByPlatform = Dictionary(grouping: results, by: \.platform)
+        let platforms = sort == .platform && order == .desc ? Platform.allCases.reversed() : Platform.allCases
+        return platforms.compactMap { platform in
+            gamesByPlatform[platform].map { PlatformSection(platform: platform, games: $0) }
+        }
+    }
+}
+
 // MARK: - Filtering
 
 extension Game {

@@ -160,6 +160,26 @@ class GameListViewModelTest {
     }
 
     @Test
+    fun `groups by platform until grouping is turned off`() = runTest {
+        val viewModel = viewModel(FakeGamesRepository(games))
+        advanceUntilIdle()
+
+        val sections = viewModel.uiState.value.sections.orEmpty()
+            .map { section -> section.platform to section.games.map { it.title } }
+        assertEquals(listOf(Platform.PS2 to listOf("Gran Turismo"), Platform.N64 to listOf("banjo", "Zelda")), sections)
+
+        viewModel.events.test {
+            viewModel.setGroupByPlatform(false)
+            advanceUntilIdle()
+
+            assertEquals(GameListEvent.ScrollToTop, awaitItem())
+        }
+        assertFalse(viewModel.uiState.value.groupByPlatform)
+        assertNull(viewModel.uiState.value.sections)
+        assertEquals(listOf("banjo", "Gran Turismo", "Zelda"), viewModel.uiState.value.titles)
+    }
+
+    @Test
     fun `invalid draft is not applied`() = runTest {
         val viewModel = viewModel(FakeGamesRepository(games))
         advanceUntilIdle()

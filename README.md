@@ -24,8 +24,8 @@ A catalogue for collectors of computer and console games. A monorepo with three 
   it up in [UPCitemdb](https://www.upcitemdb.com) (barcode → product) and [IGDB](https://www.igdb.com)
   (genre, developer, publisher, release year, cover) and the form is prefilled with what they know.
   It also warns when the game is already in the collection. See [Barcode lookup](#barcode-lookup).
-- List with full-text search, sorting and advanced filters:
-  platforms, status, format, region, completeness, condition, play status, genre, publisher, developer,
+- List grouped by platform (can be turned off in the sort menu), with full-text search, sorting
+  and advanced filters: platforms, status, format, region, completeness, condition, play status, genre, publisher, developer,
   storage location, favorites, with / without cover, and ranges of release year, purchase price,
   estimated value, purchase date and rating. Filter options and form suggestions come from what is
   actually in the collection.

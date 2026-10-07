@@ -5,6 +5,7 @@ import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.domain.model.GameFacets
 import cz.gameshelf.app.domain.model.GameFilter
 import cz.gameshelf.app.domain.model.GameSort
+import cz.gameshelf.app.domain.model.PlatformSection
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.toUiText
 import cz.gameshelf.app.ui.games.filter.FilterDraft
@@ -13,8 +14,12 @@ data class GameListUiState(
     val searchQuery: String = "",
     val filter: GameFilter = GameFilter(),
     val sort: GameSort = GameSort(),
+    /** The list is split into sections by platform (a toggle in the sort menu). */
+    val groupByPlatform: Boolean = true,
     /** The stored games matching the search and filters, sorted. */
     val games: List<Game> = emptyList(),
+    /** [games] split by platform as they are shown; `null` when the list is not grouped. */
+    val sections: List<PlatformSection>? = null,
     /** Number of stored games; `null` until the local collection has been read. */
     val collectionSize: Int? = null,
     /** Facets of the whole stored collection, for the filter sheet. */
@@ -49,6 +54,6 @@ data class GameListUiState(
 sealed interface GameListEvent {
     data class ShowMessage(val message: UiText) : GameListEvent
 
-    /** Search, filters or sort changed; the list should start from the top. */
+    /** Search, filters, sort or grouping changed; the list should start from the top. */
     data object ScrollToTop : GameListEvent
 }

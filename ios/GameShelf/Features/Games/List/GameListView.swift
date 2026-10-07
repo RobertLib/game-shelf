@@ -11,14 +11,24 @@ struct GameListView: View {
     var body: some View {
         List {
             if !model.games.isEmpty {
-                Section {
-                    ForEach(model.games) { game in
-                        NavigationLink(value: MainRoute.game(game.id)) {
-                            GameRowView(game: game)
+                if let sections = model.sections {
+                    Section {
+                    } header: {
+                        ResultCountHeader(count: model.games.count, status: model.syncStatus)
+                    }
+                    ForEach(sections) { section in
+                        Section {
+                            rows(section.games)
+                        } header: {
+                            PlatformSectionHeader(platform: section.platform, count: section.games.count)
                         }
                     }
-                } header: {
-                    ResultCountHeader(count: model.games.count, status: model.syncStatus)
+                } else {
+                    Section {
+                        rows(model.games)
+                    } header: {
+                        ResultCountHeader(count: model.games.count, status: model.syncStatus)
+                    }
                 }
             }
         }
@@ -65,6 +75,14 @@ struct GameListView: View {
         )
     }
 
+    private func rows(_ games: [Game]) -> some View {
+        ForEach(games) { game in
+            NavigationLink(value: MainRoute.game(game.id)) {
+                GameRowView(game: game)
+            }
+        }
+    }
+
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         ToolbarItem(placement: .topBarLeading) {
@@ -73,7 +91,14 @@ struct GameListView: View {
             }
         }
         ToolbarItemGroup(placement: .topBarTrailing) {
-            SortMenu(sort: model.query.sort, order: model.query.order, onSort: model.setSort, onOrder: model.setOrder)
+            SortMenu(
+                sort: model.query.sort,
+                order: model.query.order,
+                groupByPlatform: model.query.groupByPlatform,
+                onSort: model.setSort,
+                onOrder: model.setOrder,
+                onGroupByPlatform: model.setGroupByPlatform
+            )
             FilterButton(activeCount: model.query.filter.activeCount) {
                 model.presentedSheet = .filters
             }
@@ -171,6 +196,30 @@ private struct ResultCountHeader: View {
     }
 }
 
+/// Platform name and its number of games; pinned while its games scroll past.
+private struct PlatformSectionHeader: View {
+    let platform: Platform
+    let count: Int
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(platform.label)
+                .font(.headline)
+                // The header style is secondary, which a hierarchical `.primary` would follow.
+                .foregroundStyle(Color.primary)
+            Spacer(minLength: 8)
+            Text(count, format: .number)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+        }
+        .textCase(nil)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(platform.label), \(Pluralization.games(count))")
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 /// Removable chips for active filters, shown under the search field.
 ///
 /// Chips wrap instead of scrolling horizontally: every active filter stays visible, and a
@@ -209,14 +258,19 @@ private struct ActiveFilterBar: View {
     }
 }
 
+/// Sort field and order, and whether the list is grouped by platform.
 private struct SortMenu: View {
     let sort: GameSortField
     let order: SortOrder
+    let groupByPlatform: Bool
     let onSort: @MainActor (GameSortField) -> Void
     let onOrder: @MainActor (SortOrder) -> Void
+    let onGroupByPlatform: @MainActor (Bool) -> Void
 
     var body: some View {
         Menu {
+            // First, so it is visible without scrolling the menu.
+            Toggle("Group by platform", isOn: Binding(get: { groupByPlatform }, set: onGroupByPlatform))
             Section("Sort by") {
                 Picker("Sort by", selection: Binding(get: { sort }, set: onSort)) {
                     ForEach(GameSortField.allCases, id: \.self) { field in
@@ -233,7 +287,7 @@ private struct SortMenu: View {
         } label: {
             Label("Sort", systemImage: "arrow.up.arrow.down")
         }
-        .accessibilityValue("\(sort.label), \(order.label.lowercased())")
+        .accessibilityValue("\(sort.label), \(order.label.lowercased())\(groupByPlatform ? ", grouped by platform" : "")")
     }
 }
 

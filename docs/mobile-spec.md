@@ -80,11 +80,17 @@ currency 3 letters (default CZK).
      cloud-off icon when the server can't be reached, otherwise "3 unsynced changes" while changes
      wait to be pushed; nothing when everything is synced.
    - Search field (debounce ~350 ms).
-   - Sort menu (field + ascending/descending). Filter button with a badge = number of active filters.
+   - Sort menu: a "Group by platform" toggle first (on by default), then field + ascending/descending.
+     Filter button with a badge = number of active filters.
    - Active filters as removable chips under the search field + "Clear all".
    - Rows: cover thumbnail (`coverImageUrl`) or a placeholder with the platform short name; title; secondary line
      "Platform · Region · Year"; badges for status (only when not OWNED), completeness and condition;
      star when favorite; estimated value if present.
+   - Grouped by platform: one section per platform in the result, under a sticky header with the platform
+     label and, at its end, its number of games (accessibility: one heading "PlayStation 2, 12 games").
+     Sections follow the Platform enum order (reversed when sorted by platform descending); within a section
+     games keep the chosen sort. The result count header comes before the first section. With grouping off,
+     the result is one flat list in the chosen sort (e.g. the most valuable games across all platforms).
    - The whole result is one list (no paging); it updates by itself when a sync brings changes.
    - Pull-to-refresh runs a sync; when it fails, show the error message (e.g. "Can't connect to the
      server. Check your connection.") and keep the list.
@@ -105,7 +111,7 @@ currency 3 letters (default CZK).
    - Genre (multi-select from facets), Publisher, Developer, Storage location (text with suggestions from facets),
    - Favorites only (toggle), Cover (any / with cover / without cover),
    - Release year from–to, Purchase price from–to, Estimated value from–to, Purchase date from–to, Minimum rating.
-   - Filters + sort survive navigation to detail and back (keep them in the list view model).
+   - Filters, sort and grouping survive navigation to detail and back (keep them in the list view model).
 5. **Game detail** – cover image (large, if any), title, all non-empty fields grouped in sections
    (Basics / Collector details / Purchase & value / Other), favorite toggle (instant, saved locally),
    "Edit", "Delete" (confirmation dialog; the game disappears at once). Prices formatted with the game's

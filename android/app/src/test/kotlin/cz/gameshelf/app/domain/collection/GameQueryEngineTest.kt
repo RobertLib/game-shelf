@@ -11,6 +11,7 @@ import cz.gameshelf.app.domain.model.GameQuery
 import cz.gameshelf.app.domain.model.GameSort
 import cz.gameshelf.app.domain.model.GameSortField
 import cz.gameshelf.app.domain.model.Platform
+import cz.gameshelf.app.domain.model.PlatformSection
 import cz.gameshelf.app.domain.model.Region
 import cz.gameshelf.app.domain.model.SortOrder
 import cz.gameshelf.app.testing.testGame
@@ -187,6 +188,34 @@ class GameQueryEngineTest {
             listOf(GRAN_TURISMO, DIZZY, ZELDA, MARIO),
             titles(GameQuery(sort = GameSort(GameSortField.CREATED_AT)), dated),
         )
+    }
+
+    @Test
+    fun `groups by platform in platform order, keeping the sort within a platform`() {
+        fun sections(sort: GameSort) = GameQueryEngine.groupByPlatform(
+            GameQueryEngine.run(collection, GameQuery(sort = sort), Locale.ENGLISH),
+            sort,
+        ).map { section -> section.platform to section.games.map { it.title } }
+
+        val byRatingDescending = GameSort(GameSortField.RATING, SortOrder.DESC)
+        assertEquals(
+            listOf(
+                Platform.PS2 to listOf(GRAN_TURISMO),
+                Platform.N64 to listOf(ZELDA, MARIO),
+                Platform.ZX_SPECTRUM to listOf(DIZZY),
+            ),
+            sections(byRatingDescending),
+        )
+        // Sorting by platform descending reverses the sections, titles stay ascending.
+        assertEquals(
+            listOf(
+                Platform.ZX_SPECTRUM to listOf(DIZZY),
+                Platform.N64 to listOf(MARIO, ZELDA),
+                Platform.PS2 to listOf(GRAN_TURISMO),
+            ),
+            sections(GameSort(GameSortField.PLATFORM, SortOrder.DESC)),
+        )
+        assertEquals(emptyList<PlatformSection>(), GameQueryEngine.groupByPlatform(emptyList(), GameSort()))
     }
 
     private class Case(val name: String, val query: GameQuery, vararg expected: String) {

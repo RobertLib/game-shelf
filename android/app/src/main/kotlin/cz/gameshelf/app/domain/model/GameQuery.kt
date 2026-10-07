@@ -6,3 +6,9 @@ data class GameQuery(
     val filter: GameFilter = GameFilter(),
     val sort: GameSort = GameSort(),
 )
+
+/** The games of one platform, a section of the collection list grouped by platform. */
+data class PlatformSection(
+    val platform: Platform,
+    val games: List<Game>,
+)

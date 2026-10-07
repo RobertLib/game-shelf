@@ -90,6 +90,11 @@ final class GameShelfUITests: XCTestCase {
         XCTAssertTrue(byValue.waitForExistence(timeout: 2))
         snapshot("14-sort-menu")
         byValue.tap()
+        // Grouped by platform, the most valuable game sits in its platform's section further down.
+        app.buttons["Sort"].tap()
+        let grouping = app.buttons["Group by platform"]
+        XCTAssertTrue(grouping.waitForExistence(timeout: 2))
+        grouping.tap()
         XCTAssertTrue(app.text("Panzer Dragoon Saga").waitForExistence(timeout: 5))
         snapshot("15-sorted-by-value")
 

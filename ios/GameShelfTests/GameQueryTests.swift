@@ -107,6 +107,25 @@ struct GameQueryTests {
         ])
     }
 
+    @Test func groupsByPlatformInPlatformOrderKeepingTheSortWithinAPlatform() {
+        func sections(_ query: GameListQuery) -> [(Platform, [String])] {
+            query.sections(of: query.results(in: Collection.games)).map { ($0.platform, $0.games.map(\.title)) }
+        }
+
+        let byRating = sections(GameListQuery(sort: .rating, order: .desc))
+        #expect(byRating.map(\.0) == [.ps2, .n64, .zxSpectrum])
+        #expect(byRating.map(\.1) == [
+            ["Gran Turismo 3: A-Spec"],
+            ["The Legend of Zelda: Ocarina of Time", "Super Mario 64"],
+            ["Dizzy: Prince of the Yolkfolk"],
+        ])
+        // Sorting by platform descending reverses the sections, titles stay ascending.
+        let byPlatform = sections(GameListQuery(sort: .platform, order: .desc))
+        #expect(byPlatform.map(\.0) == [.zxSpectrum, .n64, .ps2])
+        #expect(byPlatform[1].1 == ["Super Mario 64", "The Legend of Zelda: Ocarina of Time"])
+        #expect(GameListQuery().sections(of: []).isEmpty)
+    }
+
     @Test func titlesCompareCaseInsensitivelyAndNumerically() {
         let games = ["game 10", "Game 2", "alpha", "Beta"].map { Fixtures.game($0) }
         #expect(titles(GameListQuery(), in: games) == ["alpha", "Beta", "Game 2", "game 10"])

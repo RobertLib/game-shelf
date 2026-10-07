@@ -165,6 +165,8 @@ struct GameListQuery: Hashable, Sendable {
     var filter = GameFilter()
     var sort: GameSortField = .title
     var order: SortOrder = .asc
+    /// Show the results in one section per platform (a toggle in the sort menu).
+    var groupByPlatform = true
 
     /// A search or filter narrows the results.
     var isFiltered: Bool {

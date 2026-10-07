@@ -1,8 +1,8 @@
 import Foundation
 import Observation
 
-/// State of the collection list: the query (search, filters, sort) and its results, computed
-/// from the local collection. Lives as long as the main flow, so filters and sort survive
+/// State of the collection list: the query (search, filters, sort, grouping) and its results,
+/// computed from the local collection. Lives as long as the main flow, so filters and sort survive
 /// navigation to the detail and back.
 @Observable
 @MainActor
@@ -35,8 +35,10 @@ final class GameListViewModel {
     var presentedSheet: Sheet?
 
     private(set) var query = GameListQuery()
-    /// Games matching ``query``, in display order.
+    /// Games matching ``query``, sorted.
     private(set) var games: [Game] = []
+    /// ``games`` split by platform as they are shown; `nil` when the list is not grouped.
+    private(set) var sections: [PlatformSection]?
     /// The user asked to retry the failed first sync.
     private(set) var isRetrying = false
     private var resultsComputedFor: ResultsKey?
@@ -115,6 +117,10 @@ final class GameListViewModel {
         query.order = order
     }
 
+    func setGroupByPlatform(_ enabled: Bool) {
+        query.groupByPlatform = enabled
+    }
+
     // MARK: Results
 
     /// Recomputes the results for the current query and collection. Filtering and sorting run off
@@ -125,16 +131,23 @@ final class GameListViewModel {
         guard let results = await Self.results(of: key.query, in: Array(repository.games)),
               key == resultsKey
         else { return }
-        games = results
+        games = results.games
+        sections = results.sections
         resultsComputedFor = key
+    }
+
+    private struct Results: Sendable {
+        var games: [Game]
+        var sections: [PlatformSection]?
     }
 
     /// `nil` when the calling task was cancelled (a newer query or collection replaced it).
     @concurrent
-    private nonisolated static func results(of query: GameListQuery, in games: [Game]) async -> [Game]? {
+    private nonisolated static func results(of query: GameListQuery, in games: [Game]) async -> Results? {
         guard !Task.isCancelled else { return nil }
         let results = query.results(in: games)
-        return Task.isCancelled ? nil : results
+        let sections = query.groupByPlatform ? query.sections(of: results) : nil
+        return Task.isCancelled ? nil : Results(games: results, sections: sections)
     }
 
     // MARK: Sync
