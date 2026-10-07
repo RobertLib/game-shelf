@@ -1,6 +1,8 @@
 package cz.gameshelf.app.ui.games.edit
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
@@ -35,6 +37,7 @@ import cz.gameshelf.app.ui.components.ConfirmDialog
 import cz.gameshelf.app.ui.components.ErrorContent
 import cz.gameshelf.app.ui.components.LoadingContent
 import cz.gameshelf.app.ui.components.NavigationIconButton
+import cz.gameshelf.app.ui.components.rememberBarcodeScanner
 import cz.gameshelf.app.ui.theme.GameShelfTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -60,10 +63,20 @@ fun GameEditRoute(
 
     BackHandler(enabled = state.hasChanges) { viewModel.requestClose() }
 
+    val scanBarcode = rememberBarcodeScanner(
+        onScanned = viewModel::onBarcodeScanned,
+        onUnavailable = {
+            scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.scanner_unavailable)) }
+        },
+    )
+
     GameEditScreen(
         state = state,
         snackbarHostState = snackbarHostState,
         onFormChange = viewModel::updateForm,
+        onScanBarcode = scanBarcode,
+        onRetryLookup = viewModel::retryLookup,
+        onDismissLookup = viewModel::dismissLookup,
         onSave = viewModel::save,
         onClose = viewModel::requestClose,
     )
@@ -87,6 +100,9 @@ fun GameEditScreen(
     state: GameEditUiState,
     snackbarHostState: SnackbarHostState,
     onFormChange: ((GameForm) -> GameForm) -> Unit,
+    onScanBarcode: () -> Unit,
+    onRetryLookup: () -> Unit,
+    onDismissLookup: () -> Unit,
     onSave: () -> Unit,
     onClose: () -> Unit,
 ) {
@@ -125,11 +141,8 @@ fun GameEditScreen(
                 message = state.loadError.asString(),
                 modifier = Modifier.padding(padding),
             )
-            else -> GameFormContent(
-                form = state.form,
-                errors = state.errors,
-                suggestions = state.suggestions,
-                onFormChange = onFormChange,
+            else -> Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -137,7 +150,21 @@ fun GameEditScreen(
                     .imePadding()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 8.dp),
-            )
+            ) {
+                BarcodeLookupCard(
+                    status = state.lookup,
+                    duplicate = state.duplicate,
+                    onRetry = onRetryLookup,
+                    onDismiss = onDismissLookup,
+                )
+                GameFormContent(
+                    form = state.form,
+                    errors = state.errors,
+                    suggestions = state.suggestions,
+                    onFormChange = onFormChange,
+                    onScanBarcode = onScanBarcode,
+                )
+            }
         }
     }
 }
@@ -150,6 +177,9 @@ private fun GameEditScreenPreview() {
             state = GameEditUiState(isEditing = false),
             snackbarHostState = SnackbarHostState(),
             onFormChange = {},
+            onScanBarcode = {},
+            onRetryLookup = {},
+            onDismissLookup = {},
             onSave = {},
             onClose = {},
         )

@@ -10,13 +10,19 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.toRoute
 import cz.gameshelf.app.R
 import cz.gameshelf.app.data.games.GamesRepository
+import cz.gameshelf.app.data.lookup.BarcodeLookupRepository
+import cz.gameshelf.app.data.lookup.BarcodeLookupResult
 import cz.gameshelf.app.domain.collection.GameFacetsCalculator
+import cz.gameshelf.app.domain.model.Barcodes
+import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.domain.model.GameFacets
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.appContainer
+import cz.gameshelf.app.ui.common.toUiText
 import cz.gameshelf.app.ui.navigation.GameEdit
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,6 +44,9 @@ data class GameEditUiState(
     val isSaving: Boolean = false,
     val showDiscardDialog: Boolean = false,
     val suggestions: FormSuggestions = FormSuggestions(),
+    val lookup: BarcodeLookupStatus? = null,
+    /** A game in the collection with the scanned barcode. */
+    val duplicate: Game? = null,
 ) {
     val hasChanges: Boolean get() = form != initialForm
     val canSave: Boolean get() = !isLoading && loadError == null && !isSaving
@@ -51,6 +60,17 @@ data class FormSuggestions(
     val storageLocations: List<String> = emptyList(),
 )
 
+/** Progress and outcome of looking up a scanned barcode. */
+sealed interface BarcodeLookupStatus {
+    data object Loading : BarcodeLookupStatus
+
+    data class Found(val sources: List<String>) : BarcodeLookupStatus
+
+    data object NotFound : BarcodeLookupStatus
+
+    data class Failed(val message: UiText) : BarcodeLookupStatus
+}
+
 sealed interface GameEditEvent {
     data class ShowMessage(val message: UiText) : GameEditEvent
 
@@ -58,14 +78,20 @@ sealed interface GameEditEvent {
     data object Close : GameEditEvent
 }
 
-/** Add / edit form. The game is read from and saved to the local collection, so saving works offline. */
+/**
+ * Add / edit form. The game is read from and saved to the local collection, so saving works offline.
+ * A scanned barcode is looked up in the game databases behind the API, which needs a connection; what
+ * they know fills the fields that are still empty.
+ */
 class GameEditViewModel(
     savedStateHandle: SavedStateHandle,
     private val repository: GamesRepository,
+    private val barcodeLookup: BarcodeLookupRepository,
     private val computeDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
-    private val gameId: String? = savedStateHandle.toRoute<GameEdit>().gameId
+    private val route = savedStateHandle.toRoute<GameEdit>()
+    private val gameId: String? = route.gameId
 
     private val _uiState = MutableStateFlow(GameEditUiState(isEditing = gameId != null, isLoading = gameId != null))
     val uiState: StateFlow<GameEditUiState> = _uiState.asStateFlow()
@@ -76,8 +102,12 @@ class GameEditViewModel(
     /** After the first save attempt, errors follow the input live. */
     private var validateOnChange = false
 
+    private var lookupJob: Job? = null
+
     init {
         if (gameId != null) loadGame(gameId)
+        // Scanned before the form opened ("Scan barcode" in the list).
+        if (gameId == null) route.barcode?.let(::onBarcodeScanned)
         viewModelScope.launch {
             val games = repository.games.first()
             val suggestions = withContext(computeDispatcher) { GameFacetsCalculator.calculate(games).toSuggestions() }
@@ -122,6 +152,50 @@ class GameEditViewModel(
         }
     }
 
+    /** A barcode from the camera: fills it in and looks the game up. */
+    fun onBarcodeScanned(code: String) {
+        val barcode = Barcodes.normalize(code)
+        updateForm { it.copy(barcode = barcode) }
+        if (Barcodes.isValid(barcode)) {
+            lookUp(barcode)
+        } else {
+            // A code typed by hand in the scanner; the field shows what is wrong with it.
+            lookupJob?.cancel()
+            _uiState.update { it.copy(lookup = null, duplicate = null) }
+        }
+    }
+
+    fun retryLookup() {
+        val barcode = Barcodes.normalize(_uiState.value.form.barcode)
+        if (Barcodes.isValid(barcode)) lookUp(barcode)
+    }
+
+    fun dismissLookup() {
+        lookupJob?.cancel()
+        _uiState.update { it.copy(lookup = null, duplicate = null) }
+    }
+
+    private fun lookUp(barcode: String) {
+        lookupJob?.cancel()
+        _uiState.update { it.copy(lookup = BarcodeLookupStatus.Loading) }
+        lookupJob = viewModelScope.launch {
+            val duplicate = repository.games.first().firstOrNull { game ->
+                game.id != gameId && game.barcode?.let { Barcodes.sameProduct(it, barcode) } == true
+            }
+            _uiState.update { it.copy(duplicate = duplicate) }
+
+            val status = when (val result = barcodeLookup.lookup(barcode)) {
+                is BarcodeLookupResult.Found -> {
+                    updateForm { it.fillFrom(result.game) }
+                    BarcodeLookupStatus.Found(result.game.sources)
+                }
+                BarcodeLookupResult.NotFound -> BarcodeLookupStatus.NotFound
+                is BarcodeLookupResult.Failed -> BarcodeLookupStatus.Failed(result.error.toUiText())
+            }
+            _uiState.update { it.copy(lookup = status) }
+        }
+    }
+
     /** Back / close: asks first when there are unsaved changes. */
     fun requestClose() {
         if (_uiState.value.hasChanges && !_uiState.value.isSaving) {
@@ -162,7 +236,13 @@ class GameEditViewModel(
 
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
-            initializer { GameEditViewModel(createSavedStateHandle(), appContainer.gamesRepository) }
+            initializer {
+                GameEditViewModel(
+                    createSavedStateHandle(),
+                    appContainer.gamesRepository,
+                    appContainer.barcodeLookupRepository,
+                )
+            }
         }
     }
 }

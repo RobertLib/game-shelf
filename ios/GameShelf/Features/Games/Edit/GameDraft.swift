@@ -72,6 +72,23 @@ struct GameDraft: Equatable {
         notes = request.notes ?? ""
     }
 
+    /// Fills the empty fields with what a barcode lookup found; whatever the user entered stays.
+    mutating func fill(from lookup: BarcodeLookup) {
+        func fill(_ field: inout String, with value: String?) {
+            if field.isBlank, let value { field = value }
+        }
+        fill(&title, with: lookup.title)
+        fill(&edition, with: lookup.edition)
+        fill(&genre, with: lookup.genre)
+        fill(&developer, with: lookup.developer)
+        fill(&publisher, with: lookup.publisher)
+        fill(&releaseYear, with: lookup.releaseYear.map(String.init))
+        fill(&coverImageUrl, with: lookup.coverImageUrl)
+        fill(&barcode, with: lookup.barcode)
+        platform = platform ?? lookup.platform
+        region = region ?? lookup.region
+    }
+
     /// Validation messages per field. "Required" errors are only reported once the
     /// user tried to save, format errors immediately.
     func errors(includingRequired: Bool) -> [Field: String] {

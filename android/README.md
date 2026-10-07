@@ -83,6 +83,12 @@ The release build is minified with R8; signing is not configured in the reposito
 - **Tokens** are stored in Preferences DataStore, encrypted with an AES/GCM key from the Android
   Keystore; the file is excluded from backups and device transfers.
 - **Room schema** is exported to `app/schemas/` (baseline for future migrations).
+- **Barcode scanning** uses Google's code scanner from Play services (`ui/components/BarcodeScanner.kt`):
+  Google's own full-screen camera UI, so the app needs no camera permission; the scanner module is
+  downloaded with the app (`com.google.mlkit.vision.DEPENDENCIES` in the manifest). On an emulator use
+  an image with Google Play and the virtual scene camera, or type the code in the scanner. The
+  scanned code goes to the form (`GameEdit(barcode = …)`), whose ViewModel looks it up through
+  `data/lookup` (`GET lookup/barcode/{barcode}`) and fills only the empty fields.
 - **Manual DI**: `AppContainer` is created by `GameShelfApplication`; ViewModels are built with
   `viewModelFactory { initializer { … } }`. Images are loaded by Coil 3 over a shared OkHttp client.
 - The UI is English only. Numbers, prices (always in the game's currency) and dates follow the
@@ -97,6 +103,7 @@ cz.gameshelf.app
 ├── data/local      Room database (games, pending changes, sync state), LocalGameStore
 ├── data/sync       SyncEngine, pending changes, field diff, network / foreground monitors
 ├── data/games      GamesRepository (local reads and writes)
+├── data/lookup     BarcodeLookupRepository (barcode → game details, online only)
 ├── di              AppContainer
 ├── domain/model    API models (Game, GameFacets, enums), filters, errors
 ├── domain/collection  local search / filter / sort engine and facets

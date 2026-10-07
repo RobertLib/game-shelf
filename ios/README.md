@@ -40,6 +40,7 @@ throwaway accounts for everything that changes data.
 | `-uiTestingInitialScreen <screen>` | `list`, `detail`, `edit`, `form`, `filters`, `profile`, `register`, `changePassword`, `deleteAccount` |
 | `-uiTestingDemoFilters` | apply sample filters (shows the filter chips) |
 | `-uiTestingDemoFiltersDelayed` | the same, applied like "Apply" in the filter sheet (opens and closes it) |
+| `-uiTestingScannedBarcode <digits>` | open "Add game" as if the barcode had been scanned (the simulator has no camera) |
 
 Example: `xcrun simctl launch booted cz.gameshelf.app -uiTestingInitialScreen filters`.
 
@@ -101,8 +102,13 @@ pointing to `make ios-device-host`.
   `SessionStore` (`@Observable @MainActor`).
 - **Models/** – types matching the OpenAPI contract; unknown enum values decode to a fallback
   (`OTHER` / `unknown`), and `SaveGameRequest` sends empty values as explicit `null`.
-- **Features/** – screens by feature (Auth, Games/List, Detail, Edit, Filters, Profile), each
+- **Features/** – screens by feature (Auth, Games/List, Detail, Edit, Filters, Scan, Profile), each
   with an `@Observable @MainActor` view model; filters and sort live in the list view model.
+- **Barcode scanning** (`Features/Games/Scan`) uses VisionKit's `DataScannerViewController`
+  (camera permission text: `NSCameraUsageDescription` in the target's build settings). The simulator
+  and devices without a supported camera offer typing the number instead; for screenshots use
+  `-uiTestingScannedBarcode`. The form looks the code up through `BarcodeLookupService`
+  (`GET lookup/barcode/{barcode}`, passed in the SwiftUI environment) and fills only empty fields.
 - **UI/Components** – shared views (cover with a platform placeholder, chips, flow layout,
   text fields with suggestions from facets, optional date picker…); **UI/Preview** – sample
   data for `#Preview`s (Debug only).

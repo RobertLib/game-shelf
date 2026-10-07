@@ -28,6 +28,7 @@
     <string name="error_network">Can\'t connect to the server. Check your connection.</string>
     <string name="error_unknown">Something went wrong. Please try again.</string>
     <string name="error_changes_rejected">Some changes were rejected by the server and have been undone.</string>
+    <string name="error_lookup_unavailable">The game database isn\'t available right now. Try again later.</string>
 
     <!-- Client-side validation -->
     <string name="validation_required">This field is required.</string>
@@ -223,6 +224,17 @@
     <string name="discard_title">Discard changes?</string>
     <string name="discard_message">Your changes will not be saved.</string>
     <string name="game_saved">Game saved.</string>
+
+    <!-- Barcode scanning and lookup -->
+    <string name="action_scan_barcode">Scan barcode</string>
+    <string name="action_dismiss">Dismiss</string>
+    <string name="scanner_unavailable">Couldn\'t open the barcode scanner. Try again in a moment.</string>
+    <string name="lookup_loading">Looking up the game…</string>
+    <string name="lookup_found">Details filled in from the game database. Check them before saving.</string>
+    <string name="lookup_sources">Source: %1$s</string>
+    <string name="lookup_not_found">This barcode isn\'t in the game database. Fill in the details yourself.</string>
+    <string name="lookup_failed">Couldn\'t look up the barcode. %1$s</string>
+    <string name="lookup_duplicate">Already in your collection: %1$s (%2$s)</string>
 
     <!-- Profile -->
     <string name="profile_title">Profile &amp; settings</string>

@@ -20,6 +20,10 @@ A catalogue for collectors of computer and console games. A monorepo with three 
   edition, completeness (sealed, CIB, loose …), condition, genre, developer, publisher, release year,
   barcode, product code, quantity, purchase price, purchase date and place, estimated value, currency,
   storage location, rating 1–10, favorite, cover image URL, play status and notes.
+- **Adding a game by its barcode:** point the phone's camera at the barcode on the box; the API looks
+  it up in [UPCitemdb](https://www.upcitemdb.com) (barcode → product) and [IGDB](https://www.igdb.com)
+  (genre, developer, publisher, release year, cover) and the form is prefilled with what they know.
+  It also warns when the game is already in the collection. See [Barcode lookup](#barcode-lookup).
 - List with full-text search, sorting and advanced filters:
   platforms, status, format, region, completeness, condition, play status, genre, publisher, developer,
   storage location, favorites, with / without cover, and ranges of release year, purchase price,
@@ -85,9 +89,27 @@ In short:
 | GET | `/api/v1/games/changes` | change feed for offline sync (cursor-based) |
 | POST | `/api/v1/games` | new game; idempotent with a client-generated `id` |
 | GET / PUT / PATCH / DELETE | `/api/v1/games/{id}` | detail / replace / change some fields / delete |
+| GET | `/api/v1/lookup/barcode/{barcode}` | game details for a scanned EAN / UPC |
 
 Errors always have the shape `{ statusCode, code, message, details? }`; the apps show their own
 messages based on `code`.
+
+## Barcode lookup
+
+The apps never call the external databases themselves; the API does (`api/src/lookup`) and caches
+the answers in memory:
+
+- **UPCitemdb** turns the code into a shop listing ("Mario Kart 8 Deluxe - Nintendo Switch"), from
+  which the API takes the title, platform, edition and region. Without configuration it uses the free
+  trial endpoint: **100 lookups a day per server IP address**. For more, buy a plan and set
+  `UPCITEMDB_USER_KEY` in `api/.env`.
+- **IGDB** (optional, free) adds genre, developer, publisher, release year and a cover. Register an
+  application at [dev.twitch.tv/console](https://dev.twitch.tv/console) (a Twitch account with
+  two-factor authentication; IGDB does not use the OAuth redirect URL, `http://localhost` will do),
+  generate a client secret and set `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET` in `api/.env`.
+
+Coverage of European (PAL) and older games in UPCitemdb is patchy; when a code is not found, the
+form keeps the barcode and the rest is filled in by hand.
 
 ## Tests
 

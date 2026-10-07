@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
@@ -16,6 +18,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -47,6 +50,7 @@ fun GameFormContent(
     errors: Map<GameField, UiText>,
     suggestions: FormSuggestions,
     onFormChange: ((GameForm) -> GameForm) -> Unit,
+    onScanBarcode: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     fun error(field: GameField): UiText? = errors[field]
@@ -170,6 +174,14 @@ fun GameFormContent(
                 label = stringResource(R.string.field_barcode),
                 error = error(GameField.BARCODE),
                 keyboardType = KeyboardType.Number,
+                trailingIcon = {
+                    IconButton(onClick = onScanBarcode) {
+                        Icon(
+                            painterResource(R.drawable.ic_barcode_scanner),
+                            contentDescription = stringResource(R.string.action_scan_barcode),
+                        )
+                    }
+                },
             )
             FormTextField(
                 value = form.productCode,
@@ -309,12 +321,14 @@ private fun FormTextField(
     capitalization: KeyboardCapitalization = KeyboardCapitalization.Sentences,
     singleLine: Boolean = true,
     minLines: Int = 1,
+    trailingIcon: (@Composable () -> Unit)? = null,
 ) {
     val message = error?.asString() ?: supportingText
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
+        trailingIcon = trailingIcon,
         isError = error != null,
         supportingText = message?.let { { Text(it) } },
         singleLine = singleLine,

@@ -2,6 +2,7 @@ package cz.gameshelf.app.data.api
 
 import cz.gameshelf.app.data.api.dto.ErrorResponse
 import cz.gameshelf.app.data.api.dto.GameChanges
+import cz.gameshelf.app.domain.model.BarcodeLookup
 import cz.gameshelf.app.domain.model.CollectionStatus
 import cz.gameshelf.app.domain.model.Completeness
 import cz.gameshelf.app.domain.model.Condition
@@ -28,6 +29,23 @@ import java.time.Instant
 import java.time.LocalDate
 
 class ApiJsonTest {
+
+    @Test
+    fun `decodes a barcode lookup`() {
+        val lookup = ApiJson.decodeFromString<BarcodeLookup>(
+            """
+            {"barcode": "045496420055", "title": "Mario Kart 8 Deluxe", "platform": "SWITCH", "region": null,
+             "edition": null, "genre": "Racing", "developer": "Nintendo EPD", "publisher": "Nintendo",
+             "releaseYear": 2017, "coverImageUrl": null, "sources": ["UPCitemdb", "IGDB"]}
+            """,
+        )
+
+        assertEquals("Mario Kart 8 Deluxe", lookup.title)
+        assertEquals(Platform.SWITCH, lookup.platform)
+        assertNull(lookup.region)
+        assertEquals(2017, lookup.releaseYear)
+        assertEquals(listOf("UPCitemdb", "IGDB"), lookup.sources)
+    }
 
     @Test
     fun `decodes a full game`() {

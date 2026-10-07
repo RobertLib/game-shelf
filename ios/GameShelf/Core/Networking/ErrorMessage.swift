@@ -45,6 +45,8 @@ enum ErrorMessage {
             "Too many attempts. Please try again in a moment."
         case .gameNotFound:
             "Game not found."
+        case .lookupUnavailable:
+            "The game database isn't available right now. Try again later."
         case .unknown where statusCode == 429:
             "Too many attempts. Please try again in a moment."
         default:

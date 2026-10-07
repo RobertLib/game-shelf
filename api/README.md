@@ -32,6 +32,7 @@ Demo account with ~40 games: `npm run build && npm run db:seed` → `demo@exampl
 src/
   auth/       sign-up, sign-in, refresh tokens, password change, account deletion, global JWT guard
   games/      games CRUD, filters (games.query.ts), facets for filter UIs
+  lookup/     barcode lookup: UPCitemdb + IGDB clients, listing title parsing, in-memory cache
   common/     error format, decorators, query parameter transforms
   config/     environment validation
   prisma/     PrismaService (lazy connection via @prisma/adapter-pg)
@@ -52,3 +53,11 @@ test/         e2e tests (supertest)
 - **Rate limiting:** 300 requests/min per IP, 10/min for endpoints that take a password. Behind a
   reverse proxy set `TRUST_PROXY` (e.g. `1`), otherwise the proxy's IP address is limited.
 - `PUT /games/{id}` fully replaces the record (omitted optional fields are cleared).
+- **Barcode lookup** (`GET /lookup/barcode/{barcode}`): UPCitemdb maps the EAN / UPC to a shop
+  listing; `product-title.ts` takes the game name, platform, edition and region out of its title;
+  IGDB (when `IGDB_CLIENT_ID` / `IGDB_CLIENT_SECRET` are set) finds the game by name
+  (`igdb-match.ts`: word similarity, preferring the scanned platform and full games over add-ons)
+  and adds genre, developer, publisher, release year and cover. Results are cached in memory (found
+  for 7 days, unknown codes for 6 hours) and concurrent lookups of one code share one request,
+  because the free UPCitemdb plan allows 100 lookups a day. The endpoint is limited to 30 calls/min.
+  A UPC-A scanned as EAN-13 (leading `0`) is looked up by its 12 digits.

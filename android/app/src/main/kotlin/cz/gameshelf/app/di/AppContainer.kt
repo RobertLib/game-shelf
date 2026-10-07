@@ -10,6 +10,7 @@ import cz.gameshelf.app.data.api.AuthInterceptor
 import cz.gameshelf.app.data.api.GamesApi
 import cz.gameshelf.app.data.api.HttpClients
 import cz.gameshelf.app.data.api.HttpClients.addDebugLogging
+import cz.gameshelf.app.data.api.LookupApi
 import cz.gameshelf.app.data.api.TokenAuthenticator
 import cz.gameshelf.app.data.api.dto.RefreshTokenRequest
 import cz.gameshelf.app.data.auth.AuthRepository
@@ -21,6 +22,8 @@ import cz.gameshelf.app.data.games.GamesRepository
 import cz.gameshelf.app.data.games.OfflineGamesRepository
 import cz.gameshelf.app.data.local.GameShelfDatabase
 import cz.gameshelf.app.data.local.LocalGameStore
+import cz.gameshelf.app.data.lookup.BarcodeLookupRepository
+import cz.gameshelf.app.data.lookup.RemoteBarcodeLookupRepository
 import cz.gameshelf.app.data.sync.ForegroundMonitor
 import cz.gameshelf.app.data.sync.NetworkMonitor
 import cz.gameshelf.app.data.sync.SyncController
@@ -97,6 +100,9 @@ class AppContainer(context: Context) {
         requestSync = syncEngine::requestSync,
         scope = appScope,
     )
+
+    val barcodeLookupRepository: BarcodeLookupRepository =
+        RemoteBarcodeLookupRepository(authenticatedRetrofit.create<LookupApi>())
 
     init {
         syncEngine.start()

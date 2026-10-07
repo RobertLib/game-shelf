@@ -1,5 +1,6 @@
 package cz.gameshelf.app.ui.games.edit
 
+import cz.gameshelf.app.domain.model.BarcodeLookup
 import cz.gameshelf.app.domain.model.CollectionStatus
 import cz.gameshelf.app.domain.model.Completeness
 import cz.gameshelf.app.domain.model.Condition
@@ -69,6 +70,20 @@ fun Game.toForm() = GameForm(
     rating = rating,
     favorite = favorite,
     notes = notes.orEmpty(),
+)
+
+/** Fills the empty fields with what a barcode lookup found; whatever the user entered stays. */
+fun GameForm.fillFrom(lookup: BarcodeLookup) = copy(
+    title = title.ifBlank { lookup.title },
+    platform = platform ?: lookup.platform,
+    edition = edition.ifBlank { lookup.edition.orEmpty() },
+    genre = genre.ifBlank { lookup.genre.orEmpty() },
+    developer = developer.ifBlank { lookup.developer.orEmpty() },
+    publisher = publisher.ifBlank { lookup.publisher.orEmpty() },
+    releaseYear = releaseYear.ifBlank { lookup.releaseYear?.toString().orEmpty() },
+    coverImageUrl = coverImageUrl.ifBlank { lookup.coverImageUrl.orEmpty() },
+    region = region ?: lookup.region,
+    barcode = barcode.ifBlank { lookup.barcode },
 )
 
 /** Fields that can carry a validation message. */

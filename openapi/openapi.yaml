@@ -788,6 +788,65 @@ paths:
       summary: Remove a game from the collection
       tags:
         - games
+  /api/v1/lookup/barcode/{barcode}:
+    get:
+      description: "Looks the EAN / UPC up in external databases and returns details
+        to prefill a new game with; nothing is saved. 404 `BARCODE_NOT_FOUND`:
+        the code is not known. 503 `LOOKUP_UNAVAILABLE`: the database cannot be
+        reached or its daily limit is used up."
+      operationId: lookupBarcode
+      parameters:
+        - name: barcode
+          required: true
+          in: path
+          description: EAN / UPC (8–14 digits).
+          schema:
+            pattern: ^[0-9]{8,14}$
+            example: "045496420055"
+            type: string
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BarcodeLookup"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: An external service the endpoint relies on is unavailable; try
+            again later
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Find a game by the barcode on its box
+      tags:
+        - lookup
 info:
   title: Game Shelf API
   description: >-
@@ -888,6 +947,8 @@ components:
         - EMAIL_ALREADY_REGISTERED
         - GAME_NOT_FOUND
         - SYNC_RESET_REQUIRED
+        - BARCODE_NOT_FOUND
+        - LOOKUP_UNAVAILABLE
         - NOT_FOUND
         - TOO_MANY_REQUESTS
         - BAD_REQUEST
@@ -1703,3 +1764,71 @@ components:
           type: string
           nullable: true
           maxLength: 5000
+    BarcodeLookup:
+      type: object
+      properties:
+        barcode:
+          type: string
+          description: "The code that was looked up, without padding zeros: UPC-A scanned
+            as EAN-13 has 12 digits."
+          example: "045496420055"
+        title:
+          type: string
+          maxLength: 200
+          example: Mario Kart 8 Deluxe
+        platform:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Platform"
+        region:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Region"
+        edition:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Collector's Edition
+        genre:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Racing
+        developer:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Nintendo EPD
+        publisher:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Nintendo
+        releaseYear:
+          type: integer
+          nullable: true
+          example: 2017
+        coverImageUrl:
+          type: string
+          format: uri
+          nullable: true
+        sources:
+          description: Databases the details come from, to be shown as attribution.
+          example:
+            - UPCitemdb
+            - IGDB
+          type: array
+          items:
+            type: string
+      required:
+        - barcode
+        - title
+        - platform
+        - region
+        - edition
+        - genre
+        - developer
+        - publisher
+        - releaseYear
+        - coverImageUrl
+        - sources

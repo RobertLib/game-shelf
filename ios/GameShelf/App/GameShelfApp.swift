@@ -28,5 +28,6 @@ private struct AppRoot: View {
 
     var body: some View {
         RootView(session: container.session, sync: container.sync)
+            .environment(\.barcodeLookup, container.barcodeLookup)
     }
 }

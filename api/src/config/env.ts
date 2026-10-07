@@ -47,6 +47,26 @@ export class Env {
   )
   @IsBoolean()
   THROTTLE_ENABLED = true;
+
+  /**
+   * UPCitemdb key of a paid plan. Without it, barcode lookups use the free
+   * trial endpoint (100 lookups a day per server IP address).
+   */
+  @IsOptional()
+  @IsString()
+  UPCITEMDB_USER_KEY?: string;
+
+  /**
+   * Twitch application credentials for IGDB, which adds genre, developer,
+   * publisher, release year and cover to barcode lookups. Optional.
+   */
+  @IsOptional()
+  @IsString()
+  IGDB_CLIENT_ID?: string;
+
+  @IsOptional()
+  @IsString()
+  IGDB_CLIENT_SECRET?: string;
 }
 
 export function validateEnv(config: Record<string, unknown>): Env {

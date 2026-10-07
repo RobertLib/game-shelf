@@ -4,6 +4,10 @@ import SwiftUI
 struct GameListView: View {
     @Bindable var model: GameListViewModel
 
+    @State private var isScanning = false
+    /// Set by the scanner; the new game opens once the scanner has closed.
+    @State private var scannedBarcode: String?
+
     var body: some View {
         List {
             if !model.games.isEmpty {
@@ -46,7 +50,12 @@ struct GameListView: View {
                 FiltersView(filter: model.query.filter, onApply: model.applyFilter)
             case .newGame:
                 GameFormView(mode: .create, repository: model.repository)
+            case .scannedGame(let barcode):
+                GameFormView(mode: .create, repository: model.repository, scannedBarcode: barcode)
             }
+        }
+        .fullScreenCover(isPresented: $isScanning, onDismiss: openScannedGame) {
+            BarcodeScannerView { scannedBarcode = $0 }
         }
         .alert(
             "Couldn't refresh",
@@ -69,11 +78,22 @@ struct GameListView: View {
                 model.presentedSheet = .filters
             }
             Button {
+                isScanning = true
+            } label: {
+                Label("Scan barcode", systemImage: "barcode.viewfinder")
+            }
+            Button {
                 model.presentedSheet = .newGame
             } label: {
                 Label("Add game", systemImage: "plus")
             }
         }
+    }
+
+    private func openScannedGame() {
+        guard let barcode = scannedBarcode else { return }
+        scannedBarcode = nil
+        model.presentedSheet = .scannedGame(barcode: barcode)
     }
 
     @ViewBuilder

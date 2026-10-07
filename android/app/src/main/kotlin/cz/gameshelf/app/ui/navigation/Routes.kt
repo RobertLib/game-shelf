@@ -22,9 +22,9 @@ data object GameList
 @Serializable
 data class GameDetail(val gameId: String)
 
-/** Add (`gameId == null`) or edit a game. */
+/** Add (`gameId == null`) or edit a game; a new game can start from a scanned [barcode]. */
 @Serializable
-data class GameEdit(val gameId: String? = null)
+data class GameEdit(val gameId: String? = null, val barcode: String? = null)
 
 @Serializable
 data object Profile

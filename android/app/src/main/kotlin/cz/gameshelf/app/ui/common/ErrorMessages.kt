@@ -20,6 +20,7 @@ fun AppError.toUiText(): UiText = when (this) {
         code == ErrorCode.TOO_MANY_REQUESTS || statusCode == HTTP_TOO_MANY_REQUESTS ->
             UiText(R.string.error_too_many_requests)
         code == ErrorCode.GAME_NOT_FOUND -> UiText(R.string.error_game_not_found)
+        code == ErrorCode.LOOKUP_UNAVAILABLE -> UiText(R.string.error_lookup_unavailable)
         else -> UiText(R.string.error_unknown)
     }
 }

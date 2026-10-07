@@ -13,9 +13,11 @@ final class GameListViewModel {
         case failed(String)
     }
 
-    enum Sheet: String, Identifiable {
+    enum Sheet: Hashable, Identifiable {
         case filters
         case newGame
+        /// A new game prefilled from a scanned barcode.
+        case scannedGame(barcode: String)
 
         var id: Self { self }
     }

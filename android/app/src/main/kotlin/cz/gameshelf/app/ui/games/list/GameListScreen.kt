@@ -1,5 +1,6 @@
 package cz.gameshelf.app.ui.games.list
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -29,6 +30,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
@@ -65,6 +67,7 @@ import cz.gameshelf.app.ui.common.resolve
 import cz.gameshelf.app.ui.components.EmptyContent
 import cz.gameshelf.app.ui.components.ErrorContent
 import cz.gameshelf.app.ui.components.LoadingContent
+import cz.gameshelf.app.ui.components.rememberBarcodeScanner
 import cz.gameshelf.app.ui.games.filter.FilterSheet
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -73,6 +76,7 @@ import kotlinx.coroutines.launch
 fun GameListRoute(
     onGameClick: (String) -> Unit,
     onAddGame: () -> Unit,
+    onAddScannedGame: (barcode: String) -> Unit,
     onOpenProfile: () -> Unit,
     viewModel: GameListViewModel = viewModel(factory = GameListViewModel.Factory),
 ) {
@@ -91,6 +95,13 @@ fun GameListRoute(
         }
     }
 
+    val scanBarcode = rememberBarcodeScanner(
+        onScanned = onAddScannedGame,
+        onUnavailable = {
+            scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.scanner_unavailable)) }
+        },
+    )
+
     GameListScreen(
         state = state,
         listState = listState,
@@ -106,6 +117,7 @@ fun GameListRoute(
         onRetry = viewModel::retry,
         onGameClick = onGameClick,
         onAddGame = onAddGame,
+        onScanBarcode = scanBarcode,
         onOpenProfile = onOpenProfile,
     )
 
@@ -138,6 +150,7 @@ fun GameListScreen(
     onRetry: () -> Unit,
     onGameClick: (String) -> Unit,
     onAddGame: () -> Unit,
+    onScanBarcode: () -> Unit,
     onOpenProfile: () -> Unit,
 ) {
     val fabExpanded by remember { derivedStateOf { listState.firstVisibleItemIndex == 0 } }
@@ -158,12 +171,27 @@ fun GameListScreen(
             )
         },
         floatingActionButton = {
-            ExtendedFloatingActionButton(
-                text = { Text(stringResource(R.string.action_add_game)) },
-                icon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
-                onClick = onAddGame,
-                expanded = fabExpanded,
-            )
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                SmallFloatingActionButton(
+                    onClick = onScanBarcode,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                ) {
+                    Icon(
+                        painterResource(R.drawable.ic_barcode_scanner),
+                        contentDescription = stringResource(R.string.action_scan_barcode),
+                    )
+                }
+                ExtendedFloatingActionButton(
+                    text = { Text(stringResource(R.string.action_add_game)) },
+                    icon = { Icon(painterResource(R.drawable.ic_add), contentDescription = null) },
+                    onClick = onAddGame,
+                    expanded = fabExpanded,
+                )
+            }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
@@ -234,7 +262,8 @@ fun GameListScreen(
                     else -> GameList(
                         games = state.games,
                         listState = listState,
-                        contentPadding = PaddingValues(bottom = bottomPadding + 88.dp),
+                        // Room for both floating action buttons under the last row.
+                        contentPadding = PaddingValues(bottom = bottomPadding + 144.dp),
                         onGameClick = onGameClick,
                     )
                 }

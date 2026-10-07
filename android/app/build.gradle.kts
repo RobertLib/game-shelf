@@ -93,6 +93,10 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
 
+    implementation(libs.play.services.code.scanner)
+    // Play services bring Fragment 1.0.0, which breaks the Activity Result API (lint InvalidFragmentVersionForActivityResult).
+    implementation(libs.androidx.fragment)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)

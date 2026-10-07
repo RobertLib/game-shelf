@@ -33,6 +33,8 @@ fun GameShelfNavHost(
                 GameListRoute(
                     onGameClick = { id -> entry.ifResumed { navController.navigate(GameDetail(id)) } },
                     onAddGame = { entry.ifResumed { navController.navigate(GameEdit()) } },
+                    // Not `ifResumed`: the result arrives while the scanner activity is still closing.
+                    onAddScannedGame = { barcode -> navController.navigate(GameEdit(barcode = barcode)) },
                     onOpenProfile = { entry.ifResumed { navController.navigate(Profile) } },
                 )
             }

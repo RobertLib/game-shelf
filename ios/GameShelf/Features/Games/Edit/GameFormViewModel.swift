@@ -6,6 +6,16 @@ enum GameFormMode: Hashable {
     case edit(Game)
 }
 
+/// Progress and outcome of looking up a scanned barcode.
+enum BarcodeLookupState: Equatable {
+    case loading
+    case found(sources: [String])
+    case notFound
+    case failed(String)
+}
+
+/// The add / edit form. Saving is local and works offline. A scanned barcode is looked up in the game
+/// databases behind the API, which needs a connection; what they know fills the fields still empty.
 @Observable
 @MainActor
 final class GameFormViewModel {
@@ -14,11 +24,18 @@ final class GameFormViewModel {
     var saveError: String?
     private(set) var isSaving = false
     private(set) var hasAttemptedSave = false
+    private(set) var lookupState: BarcodeLookupState?
+    /// A game in the collection with the scanned barcode.
+    private(set) var duplicate: Game?
 
     @ObservationIgnored private let initialDraft: GameDraft
     @ObservationIgnored private let repository: GameRepository
+    /// Scanned before the form opened; looked up once the form appears.
+    @ObservationIgnored private var initialBarcode: String?
+    /// Identifies the latest lookup, so that an older one finishing late changes nothing.
+    @ObservationIgnored private var lookupGeneration = 0
 
-    init(mode: GameFormMode, repository: GameRepository) {
+    init(mode: GameFormMode, repository: GameRepository, scannedBarcode: String? = nil) {
         self.mode = mode
         self.repository = repository
         let draft = switch mode {
@@ -27,6 +44,7 @@ final class GameFormViewModel {
         }
         self.draft = draft
         initialDraft = draft
+        initialBarcode = scannedBarcode
     }
 
     var title: String {
@@ -40,6 +58,68 @@ final class GameFormViewModel {
 
     var errors: [GameDraft.Field: String] {
         draft.errors(includingRequired: hasAttemptedSave)
+    }
+
+    /// Looks up the barcode the form was opened with, the first time only.
+    @discardableResult
+    func startInitialLookup(using service: any BarcodeLookupService) -> Task<Void, Never>? {
+        guard let barcode = initialBarcode else { return nil }
+        initialBarcode = nil
+        // Not tied to the view: navigating to the platform picker must not cancel it.
+        return Task { await scanned(barcode, using: service) }
+    }
+
+    /// A barcode from the camera: fills it in and looks the game up.
+    func scanned(_ code: String, using service: any BarcodeLookupService) async {
+        let barcode = Barcode.normalized(code)
+        draft.barcode = barcode
+        guard Barcode.isValid(barcode) else {
+            // A code typed by hand in the scanner; the field shows what is wrong with it.
+            dismissLookup()
+            return
+        }
+        await lookUp(barcode, using: service)
+    }
+
+    func retryLookup(using service: any BarcodeLookupService) async {
+        let barcode = Barcode.normalized(draft.barcode)
+        guard Barcode.isValid(barcode) else { return }
+        await lookUp(barcode, using: service)
+    }
+
+    func dismissLookup() {
+        lookupGeneration += 1
+        lookupState = nil
+        duplicate = nil
+    }
+
+    private func lookUp(_ barcode: String, using service: any BarcodeLookupService) async {
+        lookupGeneration += 1
+        let generation = lookupGeneration
+        lookupState = .loading
+        duplicate = repository.games.first { game in
+            game.id != editedGameID && game.barcode.map { Barcode.sameProduct($0, barcode) } == true
+        }
+
+        let state: BarcodeLookupState
+        do {
+            let result = try await service.lookup(barcode: barcode)
+            guard generation == lookupGeneration else { return }
+            if let result {
+                draft.fill(from: result)
+                state = .found(sources: result.sources)
+            } else {
+                state = .notFound
+            }
+        } catch {
+            guard generation == lookupGeneration else { return }
+            state = .failed(ErrorMessage.message(for: error))
+        }
+        lookupState = state
+    }
+
+    private var editedGameID: Game.ID? {
+        if case .edit(let game) = mode { game.id } else { nil }
     }
 
     /// Saves the draft on the device (it works offline; the sync engine pushes it).

@@ -10,6 +10,8 @@ enum APIErrorCode: String, Codable, Sendable {
     case emailAlreadyRegistered = "EMAIL_ALREADY_REGISTERED"
     case gameNotFound = "GAME_NOT_FOUND"
     case syncResetRequired = "SYNC_RESET_REQUIRED"
+    case barcodeNotFound = "BARCODE_NOT_FOUND"
+    case lookupUnavailable = "LOOKUP_UNAVAILABLE"
     case notFound = "NOT_FOUND"
     case tooManyRequests = "TOO_MANY_REQUESTS"
     case badRequest = "BAD_REQUEST"

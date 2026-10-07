@@ -6,6 +6,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { type Env, validateEnv } from './config/env.js';
 import { GamesModule } from './games/games.module.js';
 import { HealthController } from './health/health.controller.js';
+import { LookupModule } from './lookup/lookup.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 
 @Module({
@@ -25,6 +26,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
     PrismaModule,
     AuthModule,
     GamesModule,
+    LookupModule,
   ],
   controllers: [HealthController],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

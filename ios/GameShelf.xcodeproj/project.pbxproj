@@ -433,6 +433,7 @@
 				INFOPLIST_FILE = GameShelf/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Game Shelf";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Game Shelf uses the camera to scan the barcode on a game box and fill in its details.";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Game Shelf connects to the development API running on your computer.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -467,6 +468,7 @@
 				INFOPLIST_FILE = GameShelf/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = "Game Shelf";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Game Shelf uses the camera to scan the barcode on a game box and fill in its details.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

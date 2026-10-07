@@ -44,6 +44,11 @@ Numbers, prices and dates are formatted with the **device locale** (prices alway
   `POST games` with a client-generated `id` (`CreateGameRequest`), `PATCH games/{id}` with only the
   changed fields (`UpdateGameRequest`), `DELETE games/{id}` (idempotent), `GET games/{id}`.
   `PUT games/{id}` (full replacement) still exists for older app versions.
+- Barcode lookup: `GET lookup/barcode/{barcode}` → `BarcodeLookup` (title, platform, region, edition,
+  genre, developer, publisher, release year, cover URL and the `sources` to show as attribution).
+  `404 BARCODE_NOT_FOUND` = no database knows the code (not an error for the user),
+  `503 LOOKUP_UNAVAILABLE` = the database can't be reached now. Unlike the collection it needs a
+  connection; nothing is saved by it.
 
 ## Error messages (by `code`)
 
@@ -55,6 +60,7 @@ Numbers, prices and dates are formatted with the **device locale** (prices alway
 | VALIDATION_FAILED | Please check the entered data. (+ `details` if useful) |
 | TOO_MANY_REQUESTS | Too many attempts. Please try again in a moment. |
 | GAME_NOT_FOUND | Game not found. |
+| LOOKUP_UNAVAILABLE | The game database isn't available right now. Try again later. |
 | network failure / timeout | Can't connect to the server. Check your connection. |
 | a synced change was rejected (see offline-sync.md) | Some changes were rejected by the server and have been undone. |
 | anything else | Something went wrong. Please try again. |
@@ -86,7 +92,9 @@ currency 3 letters (default CZK).
      collection…"); the first sync failed and nothing is stored → "Couldn't load your collection" +
      the error message + "Try again"; empty collection → CTA "Add your first game"; no results →
      "No games match your filters" + reset button.
-   - FAB / toolbar "+" (Add game) → new game form. Tap a row → detail.
+   - FAB / toolbar "+" (Add game) → new game form. "Scan barcode" (Android: a small FAB above
+     "Add game"; iOS: toolbar button `barcode.viewfinder` next to "+") → scanner → new game form
+     opened with the scanned barcode (see "Scanning a barcode"). Tap a row → detail.
    - Toolbar entry to the profile/settings screen.
    - After a change is saved: "Game saved." / after a delete: "Game deleted." (Android snackbar;
      iOS shows the change in the list). When the sync engine undoes rejected changes, show
@@ -112,6 +120,7 @@ currency 3 letters (default CZK).
      clearable), Purchased from.
    - Rating & play: Play status, Rating 1–10 (clearable), Favorite, Notes (multiline).
    - Text fields offer suggestions from facets (genre, publisher, developer, storage location).
+   - The Barcode field has a "Scan barcode" button (in add and edit mode).
    - Inline validation messages, ask before discarding unsaved changes ("Discard changes?").
      Saving is local and works offline; after save, go back – the list and detail update by themselves.
 7. **Profile & settings** – email, display name; "Collection" (number of games and platforms, from the
@@ -130,6 +139,31 @@ currency 3 letters (default CZK).
    - Signing out and deleting the account remove the collection from the device. When the session
      expires on its own, the local data and unsynced changes are kept for the next sign-in of the same
      user.
+
+## Scanning a barcode
+
+1. **Scanner** – a full-screen camera view reading EAN-13, EAN-8, UPC-A and UPC-E. It also lets the
+   user type the number printed under the barcode (iOS: "Enter the number instead"; Android: the
+   scanner's own manual input). On iOS typing is the only option where the device can't scan
+   (simulator, older iPads), and a denied camera permission
+   shows "Allow Game Shelf to use the camera in Settings to scan barcodes." + "Open Settings".
+   Android uses Google's code scanner from Play services (no camera permission); when it can't
+   start: "Couldn't open the barcode scanner. Try again in a moment." Closing the scanner does nothing.
+2. The code is **normalized**: zeros padding a UPC-A to 13/14 digits are dropped (iOS reads UPC-A
+   as EAN-13 with a leading `0`), so both platforms store the same 12 digits.
+3. The form puts it into Barcode and calls `GET lookup/barcode/{barcode}`. A card above the form shows:
+   - while waiting: progress + "Looking up the game…",
+   - found: the lookup fills **only the fields that are still empty** (title, platform, edition,
+     genre, developer, publisher, release year, cover URL, region), so nothing the user typed is
+     overwritten – "Details filled in from the game database. Check them before saving." and
+     "Source: UPCitemdb · IGDB" (the `sources`),
+   - 404: "This barcode isn't in the game database. Fill in the details yourself.",
+   - failure: "Couldn't look up the barcode. " + the error message + "Try again".
+   - When another game in the collection has the same barcode (compared normalized):
+     "Already in your collection: <title> (<platform>)" – a warning only, a second copy can be saved.
+   The card can be dismissed (except while waiting). A typed code that is not 8–14 digits is put
+   into the field (form validation reports it) and not looked up.
+4. Nothing is saved until the user taps Save; leaving the form asks "Discard changes?".
 
 ## Labels
 

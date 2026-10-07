@@ -9,6 +9,8 @@ import SwiftUI
 ///                                               register | changePassword | deleteAccount
 ///     -uiTestingDemoFilters                     apply sample filters so the chips are visible
 ///     -uiTestingDemoFiltersDelayed              the same, applied like "Apply" in the filter sheet
+///     -uiTestingScannedBarcode <digits>         open "Add game" as if the barcode had been scanned
+///                                               (the simulator has no camera to scan with)
 @MainActor
 final class DebugLaunchOptions {
     enum Screen: String {
@@ -22,6 +24,7 @@ final class DebugLaunchOptions {
     let demoFilters: Bool
     let delaysDemoFilters: Bool
     private var pendingScreen: Screen?
+    private var pendingScannedBarcode: String?
 
     init(arguments: [String]) {
         func values(after flag: String, count: Int) -> [String]? {
@@ -33,6 +36,7 @@ final class DebugLaunchOptions {
         demoFilters = arguments.contains("-uiTestingDemoFilters") || delaysDemoFilters
         credentials = values(after: "-uiTestingAutoLogin", count: 2).map { ($0[0], $0[1]) }
         pendingScreen = values(after: "-uiTestingInitialScreen", count: 1).flatMap { Screen(rawValue: $0[0]) }
+        pendingScannedBarcode = values(after: "-uiTestingScannedBarcode", count: 1)?.first
     }
 
     /// Returns `true` exactly once when `screen` was requested at launch.
@@ -65,6 +69,11 @@ final class DebugLaunchOptions {
             filter.favoritesOnly = true
             filter.releaseYearFrom = 1990
             list.applyFilter(filter)
+        }
+        if let barcode = pendingScannedBarcode {
+            pendingScannedBarcode = nil
+            list.presentedSheet = .scannedGame(barcode: barcode)
+            return
         }
         guard let screen = pendingScreen else { return }
         switch screen {

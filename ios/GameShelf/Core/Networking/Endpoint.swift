@@ -88,6 +88,14 @@ extension Endpoint where Response == Game {
     }
 }
 
+// MARK: - Lookup
+
+extension Endpoint where Response == BarcodeLookup {
+    static func barcodeLookup(_ barcode: String) -> Self {
+        Endpoint(method: .get, path: "lookup/barcode/\(barcode.urlPathComponent)")
+    }
+}
+
 private extension String {
     var urlPathComponent: String {
         addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? self

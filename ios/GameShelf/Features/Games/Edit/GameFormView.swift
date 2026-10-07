@@ -4,19 +4,23 @@ import SwiftUI
 struct GameFormView: View {
     @State private var model: GameFormViewModel
     @State private var isConfirmingDiscard = false
+    @State private var isScanning = false
     @FocusState private var focusedField: GameDraft.Field?
     @Environment(FacetsStore.self) private var facets
+    @Environment(\.barcodeLookup) private var barcodeLookup
     @Environment(\.dismiss) private var dismiss
 
     private static let currencySuggestions = ["CZK", "EUR", "USD", "GBP", "JPY", "PLN"]
 
-    init(mode: GameFormMode, repository: GameRepository) {
-        _model = State(initialValue: GameFormViewModel(mode: mode, repository: repository))
+    /// `scannedBarcode`: a new game scanned from the list; it is looked up when the form appears.
+    init(mode: GameFormMode, repository: GameRepository, scannedBarcode: String? = nil) {
+        _model = State(initialValue: GameFormViewModel(mode: mode, repository: repository, scannedBarcode: scannedBarcode))
     }
 
     var body: some View {
         NavigationStack {
             Form {
+                lookupSection
                 basicSection
                 collectorSection
                 purchaseSection
@@ -26,6 +30,14 @@ struct GameFormView: View {
             .navigationTitle(model.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
+        }
+        .task {
+            model.startInitialLookup(using: barcodeLookup)
+        }
+        .fullScreenCover(isPresented: $isScanning) {
+            BarcodeScannerView { code in
+                Task { await model.scanned(code, using: barcodeLookup) }
+            }
         }
         .interactiveDismissDisabled(model.hasChanges)
         .confirmationDialog("Discard changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
@@ -45,6 +57,69 @@ struct GameFormView: View {
     private var errors: [GameDraft.Field: String] { model.errors }
 
     // MARK: Sections
+
+    /// What the barcode lookup is doing or found; nothing when there is nothing to say.
+    @ViewBuilder
+    private var lookupSection: some View {
+        if model.lookupState != nil || model.duplicate != nil {
+            Section {
+                HStack(alignment: .firstTextBaseline) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        lookupStatus
+                        if let duplicate = model.duplicate {
+                            Label(
+                                "Already in your collection: \(duplicate.title) (\(duplicate.platform.label))",
+                                systemImage: "square.stack.3d.up.fill"
+                            )
+                            .fontWeight(.semibold)
+                        }
+                    }
+                    .font(.subheadline)
+                    if model.lookupState != .loading {
+                        Spacer(minLength: 8)
+                        Button("Dismiss", systemImage: "xmark.circle.fill") {
+                            withAnimation { model.dismissLookup() }
+                        }
+                        .labelStyle(.iconOnly)
+                        .foregroundStyle(.secondary)
+                        .buttonStyle(.borderless)
+                    }
+                }
+                .accessibilityElement(children: .contain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var lookupStatus: some View {
+        switch model.lookupState {
+        case .loading:
+            Label {
+                Text("Looking up the game…")
+            } icon: {
+                ProgressView()
+            }
+        case .found(let sources):
+            Label("Details filled in from the game database. Check them before saving.", systemImage: "checkmark.circle.fill")
+                .symbolRenderingMode(.multicolor)
+            if !sources.isEmpty {
+                Text("Source: \(sources.joined(separator: " · "))")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        case .notFound:
+            Label("This barcode isn't in the game database. Fill in the details yourself.", systemImage: "questionmark.circle")
+        case .failed(let message):
+            Label("Couldn't look up the barcode. \(message)", systemImage: "exclamationmark.triangle.fill")
+                .symbolRenderingMode(.multicolor)
+            Button("Try again") {
+                Task { await model.retryLookup(using: barcodeLookup) }
+            }
+            .buttonStyle(.borderless)
+        case nil:
+            EmptyView()
+        }
+    }
 
     private var basicSection: some View {
         Section("Basics") {
@@ -120,10 +195,18 @@ struct GameFormView: View {
 
             ValidatedRow(error: errors[.barcode]) {
                 LabeledContent("Barcode (EAN/UPC)") {
-                    TextField("8–14 digits", text: $model.draft.barcode)
-                        .keyboardType(.numberPad)
-                        .multilineTextAlignment(.trailing)
-                        .focused($focusedField, equals: .barcode)
+                    HStack {
+                        TextField("8–14 digits", text: $model.draft.barcode)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .focused($focusedField, equals: .barcode)
+                        Button("Scan barcode", systemImage: "barcode.viewfinder") {
+                            focusedField = nil
+                            isScanning = true
+                        }
+                        .labelStyle(.iconOnly)
+                        .buttonStyle(.borderless)
+                    }
                 }
             }
             ValidatedRow(error: errors[.productCode]) {
