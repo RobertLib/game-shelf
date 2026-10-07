@@ -86,14 +86,14 @@ final class DebugLaunchOptions {
             pendingScreen = nil
             path.wrappedValue = [.profile, .deleteAccount]
         case .detail, .edit:
-            // Wait for the first page, then open the most complete record.
+            // Wait for the collection, then open the most complete record.
             for _ in 0..<50 where list.games.isEmpty {
                 try? await Task.sleep(for: .milliseconds(100))
             }
             let game = list.games.max { $0.filledFieldCount < $1.filledFieldCount }
             if screen == .detail { pendingScreen = nil }
             if let game {
-                path.wrappedValue = [.game(game)]
+                path.wrappedValue = [.game(game.id)]
             }
         }
     }

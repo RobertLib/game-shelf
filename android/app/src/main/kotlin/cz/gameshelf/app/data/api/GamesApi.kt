@@ -1,62 +1,36 @@
 package cz.gameshelf.app.data.api
 
+import cz.gameshelf.app.data.api.dto.GameChanges
 import cz.gameshelf.app.domain.model.Game
-import cz.gameshelf.app.domain.model.GameFacets
-import cz.gameshelf.app.domain.model.GamePage
-import cz.gameshelf.app.domain.model.SaveGameRequest
+import kotlinx.serialization.json.JsonObject
+import retrofit2.Response
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
+import retrofit2.http.PATCH
 import retrofit2.http.POST
-import retrofit2.http.PUT
 import retrofit2.http.Path
 import retrofit2.http.Query
 
+/** Game endpoints used by the sync engine (offline-sync.md, "API"). */
 interface GamesApi {
-    /** Multi-value filters are sent as repeated parameters (`platform=PS2&platform=PS5`). */
-    @GET("games")
-    suspend fun listGames(
-        @Query("q") q: String?,
-        @Query("platform") platform: List<String>,
-        @Query("status") status: List<String>,
-        @Query("format") format: List<String>,
-        @Query("region") region: List<String>,
-        @Query("completeness") completeness: List<String>,
-        @Query("condition") condition: List<String>,
-        @Query("playStatus") playStatus: List<String>,
-        @Query("genre") genre: List<String>,
-        @Query("publisher") publisher: String?,
-        @Query("developer") developer: String?,
-        @Query("storageLocation") storageLocation: String?,
-        @Query("favorite") favorite: Boolean?,
-        @Query("hasCover") hasCover: Boolean?,
-        @Query("releaseYearFrom") releaseYearFrom: Int?,
-        @Query("releaseYearTo") releaseYearTo: Int?,
-        @Query("purchaseDateFrom") purchaseDateFrom: String?,
-        @Query("purchaseDateTo") purchaseDateTo: String?,
-        @Query("purchasePriceMin") purchasePriceMin: String?,
-        @Query("purchasePriceMax") purchasePriceMax: String?,
-        @Query("estimatedValueMin") estimatedValueMin: String?,
-        @Query("estimatedValueMax") estimatedValueMax: String?,
-        @Query("ratingMin") ratingMin: Int?,
-        @Query("ratingMax") ratingMax: Int?,
-        @Query("sort") sort: String?,
-        @Query("order") order: String?,
-        @Query("page") page: Int,
-        @Query("pageSize") pageSize: Int,
-    ): GamePage
-
-    @GET("games/facets")
-    suspend fun facets(): GameFacets
+    /** Change feed; a `null` [cursor] starts from the beginning. */
+    @GET("games/changes")
+    suspend fun changes(@Query("cursor") cursor: String?, @Query("limit") limit: Int): GameChanges
 
     @GET("games/{id}")
     suspend fun game(@Path("id") id: String): Game
 
+    /**
+     * [body] is a `CreateGameRequest` (every `SaveGameRequest` field plus the client-generated `id`).
+     * `201` = created, `200` = a game with this id already existed and nothing was changed.
+     */
     @POST("games")
-    suspend fun createGame(@Body body: SaveGameRequest): Game
+    suspend fun createGame(@Body body: JsonObject): Response<Game>
 
-    @PUT("games/{id}")
-    suspend fun updateGame(@Path("id") id: String, @Body body: SaveGameRequest): Game
+    /** [body] is an `UpdateGameRequest`: only the fields present change, `null` clears an optional one. */
+    @PATCH("games/{id}")
+    suspend fun updateGame(@Path("id") id: String, @Body body: JsonObject): Game
 
     @DELETE("games/{id}")
     suspend fun deleteGame(@Path("id") id: String)

@@ -150,8 +150,10 @@ final class GameShelfUITests: XCTestCase {
         app.buttons["Clear all"].tap()
         XCTAssertTrue(app.staticTexts["42 games"].waitForExistence(timeout: 5))
         app.buttons["Profile & settings"].tap()
-        XCTAssertTrue(app.buttons["Sign out"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.text("Sync").waitForExistence(timeout: 5))
         snapshot("28-profile")
+        scrollUntilHittable(app.buttons["Sign out"], in: app)
+        snapshot("29-profile-bottom")
     }
 
     // MARK: Editing
@@ -247,7 +249,9 @@ final class GameShelfUITests: XCTestCase {
         XCTAssertTrue(app.text(email).waitForExistence(timeout: 5))
         snapshot("41-profile")
 
-        app.buttons["Change password"].tap()
+        let changePassword = app.buttons["Change password"]
+        scrollUntilHittable(changePassword, in: app)
+        changePassword.tap()
         type("secret-12345", into: app.secureTextFields["Current password"])
         type("secret-67890", into: app.secureTextFields["New password"])
         type("secret-67890", into: app.secureTextFields["Confirm new password"])
@@ -257,7 +261,7 @@ final class GameShelfUITests: XCTestCase {
         app.alerts.buttons["OK"].tap()
 
         let deleteLink = app.buttons["Delete account"]
-        XCTAssertTrue(deleteLink.waitForExistence(timeout: 5))
+        scrollUntilHittable(deleteLink, in: app)
         deleteLink.tap()
         type("secret-67890", into: app.secureTextFields["Password"])
         snapshot("43-delete-account")

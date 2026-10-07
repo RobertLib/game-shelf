@@ -51,3 +51,6 @@ ios/build/
 *.ipa
 *.dSYM
 *.dSYM.zip
+
+# Per-developer Xcode settings (DEV_API_HOST), created by `make ios-device-host`
+ios/Config/Local.xcconfig

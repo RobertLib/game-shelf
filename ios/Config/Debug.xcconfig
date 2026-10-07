@@ -1,0 +1,8 @@
+// Base configuration of the GameShelf target in Debug builds.
+//
+// The simulator reaches the API on this Mac via localhost. On a physical device localhost is the
+// phone itself, so device builds use http://$(DEV_API_HOST):3000/api/v1/ (see API_BASE_URL in the
+// target's build settings). DEV_API_HOST is the Mac's local network name or IP address and lives
+// in the git-ignored Local.xcconfig next to this file; `make ios-device-host` creates it.
+
+#include? "Local.xcconfig"

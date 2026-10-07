@@ -39,6 +39,12 @@ struct ErrorMessageTests {
         #expect(ErrorMessage.message(for: URLError(.cannotConnectToHost)) == expected)
     }
 
+    @Test func localErrors() {
+        #expect(ErrorMessage.message(for: LocalStoreError.gameNotFound) == "Game not found.")
+        #expect(ErrorMessage.message(for: LocalStoreError.accessRevoked) == "Something went wrong. Please try again.")
+        #expect(ErrorMessage.changesRejected == "Some changes were rejected by the server and have been undone.")
+    }
+
     @Test func otherErrorsAreGeneric() {
         struct Unexpected: Error {}
         #expect(ErrorMessage.message(for: Unexpected()) == "Something went wrong. Please try again.")

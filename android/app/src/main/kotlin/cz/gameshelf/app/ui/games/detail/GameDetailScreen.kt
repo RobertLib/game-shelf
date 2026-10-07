@@ -14,7 +14,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -39,7 +38,6 @@ import cz.gameshelf.app.domain.model.CollectionStatus
 import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.ui.common.Formatters
 import cz.gameshelf.app.ui.common.ObserveAsEvents
-import cz.gameshelf.app.ui.common.asString
 import cz.gameshelf.app.ui.common.labelRes
 import cz.gameshelf.app.ui.common.resolve
 import cz.gameshelf.app.ui.components.ConfirmDialog
@@ -81,7 +79,6 @@ fun GameDetailRoute(
         onEdit = { state.game?.let { onEdit(it.id) } },
         onToggleFavorite = viewModel::toggleFavorite,
         onDelete = viewModel::requestDelete,
-        onRetry = viewModel::load,
     )
 
     val game = state.game
@@ -106,10 +103,8 @@ fun GameDetailScreen(
     onEdit: () -> Unit,
     onToggleFavorite: () -> Unit,
     onDelete: () -> Unit,
-    onRetry: () -> Unit,
 ) {
     val game = state.game
-    val actionsEnabled = game != null && !state.isDeleting
     Scaffold(
         topBar = {
             TopAppBar(
@@ -119,8 +114,6 @@ fun GameDetailScreen(
                     if (game != null) {
                         GameDetailActions(
                             game = game,
-                            enabled = actionsEnabled,
-                            favoriteEnabled = actionsEnabled && !state.isUpdatingFavorite,
                             onToggleFavorite = onToggleFavorite,
                             onEdit = onEdit,
                             onDelete = onDelete,
@@ -132,11 +125,10 @@ fun GameDetailScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { padding ->
         when {
-            game != null -> GameDetailContent(game, state.isDeleting, padding)
+            game != null -> GameDetailContent(game, padding)
             state.isLoading -> LoadingContent(Modifier.padding(padding))
             else -> ErrorContent(
-                message = state.loadError?.asString().orEmpty(),
-                onRetry = onRetry,
+                message = stringResource(R.string.error_game_not_found),
                 modifier = Modifier.padding(padding),
             )
         }
@@ -146,13 +138,11 @@ fun GameDetailScreen(
 @Composable
 private fun GameDetailActions(
     game: Game,
-    enabled: Boolean,
-    favoriteEnabled: Boolean,
     onToggleFavorite: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    IconButton(onClick = onToggleFavorite, enabled = favoriteEnabled) {
+    IconButton(onClick = onToggleFavorite) {
         Icon(
             painter = painterResource(if (game.favorite) R.drawable.ic_star_filled else R.drawable.ic_star_outline),
             contentDescription = stringResource(if (game.favorite) R.string.favorite_remove else R.string.favorite_add),
@@ -163,23 +153,22 @@ private fun GameDetailActions(
             },
         )
     }
-    IconButton(onClick = onEdit, enabled = enabled) {
+    IconButton(onClick = onEdit) {
         Icon(painterResource(R.drawable.ic_edit), contentDescription = stringResource(R.string.action_edit))
     }
-    IconButton(onClick = onDelete, enabled = enabled) {
+    IconButton(onClick = onDelete) {
         Icon(painterResource(R.drawable.ic_delete), contentDescription = stringResource(R.string.action_delete))
     }
 }
 
 @Composable
-private fun GameDetailContent(game: Game, isDeleting: Boolean, padding: PaddingValues) {
+private fun GameDetailContent(game: Game, padding: PaddingValues) {
     Column(
         Modifier
             .fillMaxSize()
             .padding(padding)
             .verticalScroll(rememberScrollState()),
     ) {
-        if (isDeleting) LinearProgressIndicator(Modifier.fillMaxWidth())
         Column(
             Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
@@ -295,7 +284,6 @@ private fun GameDetailScreenPreview() {
             onEdit = {},
             onToggleFavorite = {},
             onDelete = {},
-            onRetry = {},
         )
     }
 }

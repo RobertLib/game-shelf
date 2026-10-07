@@ -21,10 +21,10 @@ struct TokenRefreshTests {
         let storage: InMemorySessionStorage
         let log: RequestLog
 
-        var games: RemoteGameService { RemoteGameService(api: client) }
+        var games: RemoteGameAPI { RemoteGameAPI(api: client) }
     }
 
-    /// API stub: `games/facets` accepts only `validToken`; `auth/refresh` answers via `refreshResponse`.
+    /// API stub: `games/changes` accepts only `validToken`; `auth/refresh` answers via `refreshResponse`.
     private func makeHarness(
         validToken: String = "new-access",
         refreshDelay: Duration = .milliseconds(150),
@@ -41,11 +41,11 @@ struct TokenRefreshTests {
                 return refreshResponse()
             case "/api/v1/auth/login":
                 return (401, Fixtures.errorJSON(status: 401, code: "INVALID_CREDENTIALS"))
-            case "/api/v1/games/facets":
+            case "/api/v1/games/changes":
                 let authorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
                 await log.recordAuthorization(authorization)
                 return authorization == "Bearer \(validToken)"
-                    ? (200, Fixtures.facetsJSON)
+                    ? (200, Fixtures.changesJSON)
                     : (401, Fixtures.errorJSON(status: 401, code: "UNAUTHORIZED"))
             default:
                 return (404, Fixtures.errorJSON(status: 404, code: "NOT_FOUND"))
@@ -61,15 +61,15 @@ struct TokenRefreshTests {
         let harness = makeHarness()
         let games = harness.games
 
-        let results = try await withThrowingTaskGroup(of: GameFacets.self) { group in
+        let results = try await withThrowingTaskGroup(of: GameChanges.self) { group in
             for _ in 0..<6 {
-                group.addTask { try await games.facets() }
+                group.addTask { try await games.changes(after: nil, limit: 500) }
             }
-            return try await group.reduce(into: [GameFacets]()) { $0.append($1) }
+            return try await group.reduce(into: [GameChanges]()) { $0.append($1) }
         }
 
         #expect(results.count == 6)
-        #expect(results.allSatisfy { $0.totalItems == 3 })
+        #expect(results.allSatisfy { $0.cursor == "1234" })
         #expect(await harness.log.refreshCount == 1)
         #expect(await harness.log.refreshBodies.first?.contains("\"refreshToken\":\"old-refresh\"") == true)
         #expect(harness.storage.load()?.accessToken == "new-access")
@@ -79,8 +79,8 @@ struct TokenRefreshTests {
 
     @Test func requestAfterRefreshUsesNewTokenWithoutRefreshingAgain() async throws {
         let harness = makeHarness(refreshDelay: .zero)
-        _ = try await harness.games.facets()
-        _ = try await harness.games.facets()
+        _ = try await harness.games.changes(after: nil, limit: 500)
+        _ = try await harness.games.changes(after: nil, limit: 500)
 
         #expect(await harness.log.refreshCount == 1)
         #expect(await harness.log.authorizations == ["Bearer old-access", "Bearer new-access", "Bearer new-access"])
@@ -96,7 +96,7 @@ struct TokenRefreshTests {
         }
 
         await #expect(throws: APIError.sessionExpired) {
-            _ = try await harness.games.facets()
+            _ = try await harness.games.changes(after: nil, limit: 500)
         }
         #expect(harness.storage.load() == nil)
         #expect(await harness.tokens.accessToken == nil)
@@ -104,7 +104,7 @@ struct TokenRefreshTests {
 
         // Without a session, further calls fail fast without hitting the network.
         await #expect(throws: APIError.sessionExpired) {
-            _ = try await harness.games.facets()
+            _ = try await harness.games.changes(after: nil, limit: 500)
         }
         #expect(await harness.log.refreshCount == 1)
     }
@@ -114,7 +114,7 @@ struct TokenRefreshTests {
             (503, Data("Service Unavailable".utf8))
         }
         await #expect(throws: APIError.self) {
-            _ = try await harness.games.facets()
+            _ = try await harness.games.changes(after: nil, limit: 500)
         }
         #expect(harness.storage.load()?.refreshToken == "old-refresh")
     }
@@ -123,7 +123,7 @@ struct TokenRefreshTests {
         // The server keeps rejecting even the refreshed token: give up and end the session.
         let harness = makeHarness(validToken: "never-valid", refreshDelay: .zero)
         await #expect(throws: APIError.sessionExpired) {
-            _ = try await harness.games.facets()
+            _ = try await harness.games.changes(after: nil, limit: 500)
         }
         #expect(await harness.log.refreshCount == 1)
         #expect(await harness.log.authorizations.count == 2)

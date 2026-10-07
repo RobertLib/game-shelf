@@ -12,11 +12,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import cz.gameshelf.app.R
 import cz.gameshelf.app.ui.common.asString
+import cz.gameshelf.app.ui.components.ConfirmDialog
 import cz.gameshelf.app.ui.components.PasswordField
 
 @Composable
@@ -117,5 +119,27 @@ fun DeleteAccountDialog(
         dismissButton = {
             TextButton(onClick = onDismiss, enabled = !form.isSubmitting) { Text(stringResource(R.string.action_cancel)) }
         },
+    )
+}
+
+/** Signing out deletes the local data, so unsynced changes would be lost. */
+@Composable
+fun LogoutDialog(
+    unsyncedChanges: Int,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val hasUnsynced = unsyncedChanges > 0
+    ConfirmDialog(
+        title = stringResource(R.string.logout_title),
+        text = if (hasUnsynced) {
+            pluralStringResource(R.plurals.logout_unsynced_warning, unsyncedChanges, unsyncedChanges)
+        } else {
+            stringResource(R.string.logout_message)
+        },
+        confirmLabel = stringResource(if (hasUnsynced) R.string.action_logout_anyway else R.string.action_logout),
+        destructive = hasUnsynced,
+        onConfirm = onConfirm,
+        onDismiss = onDismiss,
     )
 }

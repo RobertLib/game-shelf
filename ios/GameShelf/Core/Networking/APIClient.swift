@@ -1,5 +1,11 @@
 import Foundation
 
+/// A decoded response with its HTTP status code.
+struct APIResponse<Value: Sendable>: Sendable {
+    var value: Value
+    var statusCode: Int
+}
+
 /// Thin JSON client for the Game Shelf REST API.
 final class APIClient: Sendable {
     let baseURL: URL
@@ -25,6 +31,12 @@ final class APIClient: Sendable {
     /// Performs the call. Authenticated calls that fail with `401` refresh the
     /// token pair once and are retried once.
     func send<Response>(_ endpoint: Endpoint<Response>) async throws -> Response {
+        try await response(for: endpoint).value
+    }
+
+    /// Like ``send(_:)``, but also returns the HTTP status code, for calls whose success
+    /// statuses mean different things (`201` created vs. `200` already existed).
+    func response<Response>(for endpoint: Endpoint<Response>) async throws -> APIResponse<Response> {
         guard endpoint.requiresAuthentication else {
             return try await perform(endpoint, accessToken: nil)
         }
@@ -35,7 +47,7 @@ final class APIClient: Sendable {
             return try await perform(endpoint, accessToken: accessToken)
         } catch let error as APIError where error.isUnauthorized {
             let renewedToken = try await tokens.accessToken(replacing: accessToken) { [self] refreshToken in
-                try await perform(.refresh(RefreshTokenRequest(refreshToken: refreshToken)), accessToken: nil)
+                try await perform(.refresh(RefreshTokenRequest(refreshToken: refreshToken)), accessToken: nil).value
             }
             do {
                 return try await perform(endpoint, accessToken: renewedToken)
@@ -46,7 +58,7 @@ final class APIClient: Sendable {
         }
     }
 
-    private func perform<Response>(_ endpoint: Endpoint<Response>, accessToken: String?) async throws -> Response {
+    private func perform<Response>(_ endpoint: Endpoint<Response>, accessToken: String?) async throws -> APIResponse<Response> {
         let request = try makeRequest(for: endpoint, accessToken: accessToken)
         let data: Data
         let response: URLResponse
@@ -69,10 +81,10 @@ final class APIClient: Sendable {
         }
 
         if let empty = EmptyResponse() as? Response {
-            return empty
+            return APIResponse(value: empty, statusCode: http.statusCode)
         }
         do {
-            return try decoder.decode(Response.self, from: data)
+            return APIResponse(value: try decoder.decode(Response.self, from: data), statusCode: http.statusCode)
         } catch {
             throw APIError.invalidResponse
         }

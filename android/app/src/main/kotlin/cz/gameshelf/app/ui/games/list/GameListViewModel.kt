@@ -7,21 +7,26 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import cz.gameshelf.app.R
 import cz.gameshelf.app.data.games.GameChange
-import cz.gameshelf.app.data.games.GameListQuery
 import cz.gameshelf.app.data.games.GamesRepository
+import cz.gameshelf.app.data.sync.SyncController
+import cz.gameshelf.app.data.sync.SyncEvent
+import cz.gameshelf.app.domain.collection.GameFacetsCalculator
+import cz.gameshelf.app.domain.collection.GameQueryEngine
 import cz.gameshelf.app.domain.model.ActiveFilter
 import cz.gameshelf.app.domain.model.ApiResult
+import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.domain.model.GameFilter
 import cz.gameshelf.app.domain.model.GameQuery
 import cz.gameshelf.app.domain.model.GameSortField
 import cz.gameshelf.app.domain.model.SortOrder
-import cz.gameshelf.app.domain.model.onSuccess
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.appContainer
 import cz.gameshelf.app.ui.common.toUiText
 import cz.gameshelf.app.ui.games.filter.FilterDraft
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,23 +35,27 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * Collection list: debounced search, filters and sort (all kept here so they survive navigating
- * to a detail and back), page-by-page loading and reaction to games changed on other screens.
+ * Collection list computed from the games stored on the device: debounced search, filters and sort
+ * (kept here so they survive navigating to a detail and back) applied to the local collection, which
+ * updates by itself whenever a local change or a sync changes it. Pull-to-refresh runs a sync.
  */
-@OptIn(FlowPreview::class)
+@OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class GameListViewModel(
     private val repository: GamesRepository,
-    private val pageSize: Int = GameListQuery.DEFAULT_PAGE_SIZE,
+    private val sync: SyncController,
     searchDebounceMillis: Long = SEARCH_DEBOUNCE_MILLIS,
+    computeDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(GameListUiState())
+    private val _uiState = MutableStateFlow(GameListUiState(sync = sync.status.value))
     val uiState: StateFlow<GameListUiState> = _uiState.asStateFlow()
 
     private val _events = Channel<GameListEvent>(Channel.BUFFERED)
@@ -54,28 +63,46 @@ class GameListViewModel(
 
     private val searchInput = MutableStateFlow("")
 
-    private var currentQuery = GameQuery()
-    private var nextPage = 1
-    private var firstPageJob: Job? = null
-    private var nextPageJob: Job? = null
-    private var facetsJob: Job? = null
-
     init {
         val debouncedSearch = searchInput
             // Clearing the search applies immediately; typing waits for a pause.
             .debounce { if (it.isBlank()) 0L else searchDebounceMillis }
             .map { it.trim() }
             .distinctUntilChanged()
+        val query = combine(
+            debouncedSearch,
+            _uiState.map { it.filter }.distinctUntilChanged(),
+            _uiState.map { it.sort }.distinctUntilChanged(),
+            ::GameQuery,
+        ).distinctUntilChanged()
+
         viewModelScope.launch {
-            combine(
-                debouncedSearch,
-                _uiState.map { it.filter }.distinctUntilChanged(),
-                _uiState.map { it.sort }.distinctUntilChanged(),
-                ::GameQuery,
-            ).distinctUntilChanged().collect { query -> loadFirstPage(query, LoadMode.NewQuery) }
+            var shownQuery: GameQuery? = null
+            combine(repository.games, query, ::Pair)
+                .mapLatest { (games, query) -> QueryResult(query, GameQueryEngine.run(games, query), games.size) }
+                .flowOn(computeDispatcher)
+                .collect { result ->
+                    _uiState.update { it.copy(games = result.games, collectionSize = result.collectionSize) }
+                    if (shownQuery != null && shownQuery != result.query) _events.send(GameListEvent.ScrollToTop)
+                    shownQuery = result.query
+                }
         }
+        viewModelScope.launch {
+            repository.games
+                .map { GameFacetsCalculator.calculate(it) }
+                .flowOn(computeDispatcher)
+                .collect { facets -> _uiState.update { it.copy(facets = facets) } }
+        }
+        viewModelScope.launch { sync.status.collect { status -> _uiState.update { it.copy(sync = status) } } }
         viewModelScope.launch { repository.changes.collect(::onGameChanged) }
-        loadFacets()
+        viewModelScope.launch {
+            sync.events.collect { event ->
+                when (event) {
+                    SyncEvent.ChangesRejected ->
+                        _events.send(GameListEvent.ShowMessage(UiText(R.string.error_changes_rejected)))
+                }
+            }
+        }
     }
 
     fun onSearchQueryChange(value: String) {
@@ -83,47 +110,31 @@ class GameListViewModel(
         searchInput.value = value
     }
 
+    /** Pull-to-refresh: runs a sync; a failure is reported and the list is kept. */
     fun refresh() {
-        loadFirstPage(currentQuery, LoadMode.Refresh)
-        loadFacets()
-    }
-
-    fun retry() {
-        loadFirstPage(currentQuery, LoadMode.NewQuery)
-        loadFacets()
-    }
-
-    /** Called when the list is scrolled near its end; ignored while a page is already loading. */
-    fun loadNextPage() {
-        val state = _uiState.value
-        val busy = state.isLoading || state.isRefreshing || state.isLoadingMore || nextPageJob?.isActive == true
-        if (busy || state.endReached || state.loadMoreFailed || state.loadError != null) return
-
-        val query = currentQuery
-        val page = nextPage
-        _uiState.update { it.copy(isLoadingMore = true) }
-        nextPageJob = viewModelScope.launch {
-            when (val result = repository.listGames(query, page, pageSize)) {
-                is ApiResult.Success -> {
-                    val pageData = result.value
-                    nextPage = page + 1
-                    _uiState.update { state ->
-                        state.copy(
-                            games = (state.games + pageData.items).distinctBy { it.id },
-                            totalItems = pageData.totalItems,
-                            endReached = pageData.items.isEmpty() || pageData.page >= pageData.totalPages,
-                            isLoadingMore = false,
-                        )
-                    }
-                }
-                is ApiResult.Failure -> _uiState.update { it.copy(isLoadingMore = false, loadMoreFailed = true) }
+        if (_uiState.value.isRefreshing) return
+        _uiState.update { it.copy(isRefreshing = true) }
+        viewModelScope.launch {
+            try {
+                val result = sync.syncNow()
+                if (result is ApiResult.Failure) _events.send(GameListEvent.ShowMessage(result.error.toUiText()))
+            } finally {
+                _uiState.update { it.copy(isRefreshing = false) }
             }
         }
     }
 
-    fun retryLoadMore() {
-        _uiState.update { it.copy(loadMoreFailed = false) }
-        loadNextPage()
+    /** "Try again" after the first sync failed; the outcome replaces the error state. */
+    fun retry() {
+        if (_uiState.value.isRetrying) return
+        _uiState.update { it.copy(isRetrying = true) }
+        viewModelScope.launch {
+            try {
+                sync.syncNow()
+            } finally {
+                _uiState.update { it.copy(isRetrying = false) }
+            }
+        }
     }
 
     fun setSortField(field: GameSortField) = _uiState.update { it.copy(sort = it.sort.copy(field = field)) }
@@ -153,101 +164,23 @@ class GameListViewModel(
 
     fun dismissFilters() = _uiState.update { it.copy(filterDraft = null) }
 
-    private fun loadFirstPage(query: GameQuery, mode: LoadMode) {
-        firstPageJob?.cancel()
-        nextPageJob?.cancel()
-        currentQuery = query
-        _uiState.update {
-            it.copy(
-                isLoading = mode == LoadMode.NewQuery,
-                isRefreshing = mode == LoadMode.Refresh,
-                loadError = null,
-                isLoadingMore = false,
-                loadMoreFailed = false,
-            )
-        }
-        firstPageJob = viewModelScope.launch {
-            when (val result = repository.listGames(query, page = 1, pageSize = pageSize)) {
-                is ApiResult.Success -> {
-                    val pageData = result.value
-                    nextPage = 2
-                    _uiState.update {
-                        it.copy(
-                            games = pageData.items,
-                            totalItems = pageData.totalItems,
-                            endReached = pageData.page >= pageData.totalPages,
-                            isLoading = false,
-                            isRefreshing = false,
-                        )
-                    }
-                    if (mode == LoadMode.NewQuery) _events.send(GameListEvent.ScrollToTop)
-                }
-                is ApiResult.Failure -> {
-                    val message = result.error.toUiText()
-                    val keepItems = mode != LoadMode.NewQuery && _uiState.value.games.isNotEmpty()
-                    _uiState.update {
-                        if (keepItems) {
-                            it.copy(isLoading = false, isRefreshing = false)
-                        } else {
-                            it.copy(
-                                isLoading = false,
-                                isRefreshing = false,
-                                games = emptyList(),
-                                totalItems = 0,
-                                loadError = message,
-                            )
-                        }
-                    }
-                    if (keepItems) _events.send(GameListEvent.ShowMessage(message))
-                }
-            }
-        }
-    }
-
-    private fun loadFacets() {
-        facetsJob?.cancel()
-        facetsJob = viewModelScope.launch {
-            repository.facets().onSuccess { facets -> _uiState.update { it.copy(facets = facets) } }
-        }
-    }
-
+    /** Confirms the user's own changes; the list itself follows the stored collection. */
     private fun onGameChanged(change: GameChange) {
-        when (change) {
-            is GameChange.Created -> {
-                loadFirstPage(currentQuery, LoadMode.Silent)
-                _events.trySend(GameListEvent.ShowMessage(UiText(R.string.game_saved)))
-            }
-            is GameChange.Updated -> _uiState.update { state ->
-                state.copy(games = state.games.map { if (it.id == change.game.id) change.game else it })
-            }
-            is GameChange.Deleted -> {
-                _uiState.update { state ->
-                    val remaining = state.games.filterNot { it.id == change.id }
-                    val removed = state.games.size - remaining.size
-                    state.copy(games = remaining, totalItems = (state.totalItems - removed).coerceAtLeast(0))
-                }
-                _events.trySend(GameListEvent.ShowMessage(UiText(R.string.game_deleted)))
-            }
+        val message = when (change) {
+            is GameChange.Created -> R.string.game_saved
+            is GameChange.Deleted -> R.string.game_deleted
+            is GameChange.Updated -> return
         }
-        loadFacets()
+        _events.trySend(GameListEvent.ShowMessage(UiText(message)))
     }
 
-    private enum class LoadMode {
-        /** Search, filter or sort changed: show a loading state and scroll to the top. */
-        NewQuery,
-
-        /** Pull-to-refresh: keep the list, show the refresh indicator. */
-        Refresh,
-
-        /** Background reload after a change elsewhere: no indicator at all. */
-        Silent,
-    }
+    private class QueryResult(val query: GameQuery, val games: List<Game>, val collectionSize: Int)
 
     companion object {
         const val SEARCH_DEBOUNCE_MILLIS = 350L
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
-            initializer { GameListViewModel(appContainer.gamesRepository) }
+            initializer { GameListViewModel(appContainer.gamesRepository, appContainer.syncController) }
         }
     }
 }

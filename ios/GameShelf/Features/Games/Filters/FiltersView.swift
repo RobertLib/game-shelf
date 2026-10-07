@@ -13,7 +13,7 @@ struct FiltersView: View {
         _draft = State(initialValue: FilterDraft(filter))
     }
 
-    private var facets: GameFacets { facetsStore.facets ?? .empty }
+    private var facets: GameFacets { facetsStore.facets }
 
     var body: some View {
         NavigationStack {
@@ -269,6 +269,6 @@ extension Set {
         .sheet(isPresented: .constant(true)) {
             FiltersView(filter: filter) { _ in }
         }
-        .environment(FacetsStore(service: PreviewGameService(), facets: PreviewData.facets))
+        .environment(FacetsStore(repository: SyncEngine.preview().repository))
 }
 #endif

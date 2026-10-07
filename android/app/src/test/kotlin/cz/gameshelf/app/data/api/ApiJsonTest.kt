@@ -1,14 +1,13 @@
 package cz.gameshelf.app.data.api
 
 import cz.gameshelf.app.data.api.dto.ErrorResponse
+import cz.gameshelf.app.data.api.dto.GameChanges
 import cz.gameshelf.app.domain.model.CollectionStatus
 import cz.gameshelf.app.domain.model.Completeness
 import cz.gameshelf.app.domain.model.Condition
 import cz.gameshelf.app.domain.model.ErrorCode
 import cz.gameshelf.app.domain.model.Game
-import cz.gameshelf.app.domain.model.GameFacets
 import cz.gameshelf.app.domain.model.GameFormat
-import cz.gameshelf.app.domain.model.GamePage
 import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.domain.model.PlayStatus
 import cz.gameshelf.app.domain.model.Region
@@ -100,31 +99,16 @@ class ApiJsonTest {
     }
 
     @Test
-    fun `decodes a game page`() {
-        val json = """{"items":[$FULL_GAME_JSON],"page":2,"pageSize":25,"totalItems":26,"totalPages":2}"""
+    fun `decodes a change feed page`() {
+        val json = """{"games":[$FULL_GAME_JSON],"deletedIds":["0b9e3f4a-1c2d-4e5f-8a9b-0c1d2e3f4a5b"],
+            "cursor":"1234","hasMore":true}"""
 
-        val page = ApiJson.decodeFromString<GamePage>(json)
+        val page = ApiJson.decodeFromString<GameChanges>(json)
 
-        assertEquals(1, page.items.size)
-        assertEquals(2, page.page)
-        assertEquals(25, page.pageSize)
-        assertEquals(26, page.totalItems)
-        assertEquals(2, page.totalPages)
-    }
-
-    @Test
-    fun `decodes facets and skips unknown platforms in platform counts`() {
-        val json = """
-            {"totalItems":5,"platforms":[{"value":"PS2","count":4},{"value":"FUTURE_CONSOLE","count":1}],
-             "statuses":[{"value":"OWNED","count":5}],"genres":[],"publishers":[],"developers":[],
-             "storageLocations":[],"releaseYearMin":1998,"releaseYearMax":null}
-        """.trimIndent()
-
-        val facets = ApiJson.decodeFromString<GameFacets>(json)
-
-        assertEquals(mapOf(Platform.PS2 to 4), facets.platformCounts)
-        assertEquals(1998, facets.releaseYearMin)
-        assertNull(facets.releaseYearMax)
+        assertEquals(listOf("Banjo-Kazooie"), page.games.map { it.title })
+        assertEquals(listOf("0b9e3f4a-1c2d-4e5f-8a9b-0c1d2e3f4a5b"), page.deletedIds)
+        assertEquals("1234", page.cursor)
+        assertTrue(page.hasMore)
     }
 
     @Test
@@ -169,6 +153,9 @@ class ApiJsonTest {
 
     @Test
     fun `decodes error responses with unknown codes`() {
+        val reset = ApiJson.decodeFromString<ErrorResponse>(
+            """{"statusCode":410,"code":"SYNC_RESET_REQUIRED","message":"Sync reset required"}""",
+        )
         val known = ApiJson.decodeFromString<ErrorResponse>(
             """{"statusCode":400,"code":"VALIDATION_FAILED","message":"Validation failed",
                "details":["title should not be empty"]}""",
@@ -177,6 +164,7 @@ class ApiJsonTest {
             """{"statusCode":402,"code":"PAYMENT_REQUIRED","message":"Pay"}""",
         )
 
+        assertEquals(ErrorCode.SYNC_RESET_REQUIRED, reset.code)
         assertEquals(ErrorCode.VALIDATION_FAILED, known.code)
         assertEquals(listOf("title should not be empty"), known.details)
         assertEquals(ErrorCode.UNKNOWN, unknown.code)

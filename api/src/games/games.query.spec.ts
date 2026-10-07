@@ -1,8 +1,13 @@
 import { plainToInstance } from 'class-transformer';
 import { validateSync } from 'class-validator';
 import { ListGamesQueryDto } from './dto/list-games-query.dto.js';
-import { SaveGameDto } from './dto/save-game.dto.js';
-import { buildGameOrderBy, buildGameWhere, toGameData } from './games.query.js';
+import { SaveGameDto, UpdateGameDto } from './dto/save-game.dto.js';
+import {
+  buildGameOrderBy,
+  buildGameWhere,
+  toGameData,
+  toGamePatchData,
+} from './games.query.js';
 import { mergeCaseVariants } from './games.service.js';
 
 const parseQuery = (query: Record<string, unknown>) => {
@@ -12,8 +17,11 @@ const parseQuery = (query: Record<string, unknown>) => {
 };
 
 describe('buildGameWhere', () => {
-  it('always scopes to the user', () => {
-    expect(buildGameWhere('u1', parseQuery({}))).toEqual({ userId: 'u1' });
+  it('always scopes to the user and skips deleted games', () => {
+    expect(buildGameWhere('u1', parseQuery({}))).toEqual({
+      userId: 'u1',
+      deletedAt: null,
+    });
   });
 
   it('requires every search word to match some field', () => {
@@ -102,6 +110,52 @@ describe('toGameData', () => {
     });
     expect(validateSync(dto)).toEqual([]);
     expect(toGameData(dto).notes).toBeNull();
+  });
+});
+
+describe('toGamePatchData', () => {
+  const parsePatch = (body: Record<string, unknown>) => {
+    const dto = plainToInstance(UpdateGameDto, body);
+    return { dto, errors: validateSync(dto) };
+  };
+
+  it('changes only the fields present in the body', () => {
+    const { dto, errors } = parsePatch({
+      rating: 9,
+      region: null,
+      notes: '  ',
+      purchaseDate: '2024-05-17',
+    });
+    expect(errors).toEqual([]);
+    expect(toGamePatchData(dto)).toEqual({
+      rating: 9,
+      region: null,
+      notes: null,
+      purchaseDate: new Date('2024-05-17'),
+    });
+  });
+
+  it('accepts an empty body', () => {
+    const { dto, errors } = parsePatch({});
+    expect(errors).toEqual([]);
+    expect(toGamePatchData(dto)).toEqual({});
+  });
+
+  it('rejects null for fields that cannot be empty', () => {
+    const { errors } = parsePatch({
+      title: null,
+      platform: null,
+      status: null,
+      quantity: null,
+      favorite: null,
+    });
+    expect(errors.map((error) => error.property).sort()).toEqual([
+      'favorite',
+      'platform',
+      'quantity',
+      'status',
+      'title',
+    ]);
   });
 });
 

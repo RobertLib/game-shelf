@@ -10,21 +10,23 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.toRoute
 import cz.gameshelf.app.R
 import cz.gameshelf.app.data.games.GamesRepository
-import cz.gameshelf.app.domain.model.ApiResult
+import cz.gameshelf.app.domain.collection.GameFacetsCalculator
 import cz.gameshelf.app.domain.model.GameFacets
-import cz.gameshelf.app.domain.model.onSuccess
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.appContainer
-import cz.gameshelf.app.ui.common.toUiText
 import cz.gameshelf.app.ui.navigation.GameEdit
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class GameEditUiState(
     val isEditing: Boolean,
@@ -56,9 +58,11 @@ sealed interface GameEditEvent {
     data object Close : GameEditEvent
 }
 
+/** Add / edit form. The game is read from and saved to the local collection, so saving works offline. */
 class GameEditViewModel(
     savedStateHandle: SavedStateHandle,
     private val repository: GamesRepository,
+    private val computeDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : ViewModel() {
 
     private val gameId: String? = savedStateHandle.toRoute<GameEdit>().gameId
@@ -75,12 +79,10 @@ class GameEditViewModel(
     init {
         if (gameId != null) loadGame(gameId)
         viewModelScope.launch {
-            repository.facets().onSuccess { facets -> _uiState.update { it.copy(suggestions = facets.toSuggestions()) } }
+            val games = repository.games.first()
+            val suggestions = withContext(computeDispatcher) { GameFacetsCalculator.calculate(games).toSuggestions() }
+            _uiState.update { it.copy(suggestions = suggestions) }
         }
-    }
-
-    fun retryLoad() {
-        gameId?.let(::loadGame)
     }
 
     fun updateForm(transform: (GameForm) -> GameForm) = _uiState.update { state ->
@@ -100,20 +102,20 @@ class GameEditViewModel(
             is GameFormValidation.Valid -> {
                 _uiState.update { it.copy(errors = emptyMap(), isSaving = true) }
                 viewModelScope.launch {
-                    val result = if (gameId == null) {
+                    val saved = if (gameId == null) {
                         repository.createGame(validation.request)
                     } else {
-                        repository.updateGame(gameId, validation.request)
+                        // Only the fields edited in this form are saved, not stale copies of the others.
+                        val base = (GameFormValidator.validate(state.initialForm) as? GameFormValidation.Valid)?.request
+                        repository.updateGame(gameId, validation.request, base)
                     }
-                    when (result) {
-                        is ApiResult.Success -> {
-                            _uiState.update { it.copy(isSaving = false, initialForm = it.form) }
-                            _events.send(GameEditEvent.Close)
-                        }
-                        is ApiResult.Failure -> {
-                            _uiState.update { it.copy(isSaving = false) }
-                            _events.send(GameEditEvent.ShowMessage(result.error.toUiText()))
-                        }
+                    if (saved != null) {
+                        _uiState.update { it.copy(isSaving = false, initialForm = it.form) }
+                        _events.send(GameEditEvent.Close)
+                    } else {
+                        // Deleted (e.g. on another device) while being edited.
+                        _uiState.update { it.copy(isSaving = false) }
+                        _events.send(GameEditEvent.ShowMessage(UiText(R.string.error_game_not_found)))
                     }
                 }
             }
@@ -137,14 +139,13 @@ class GameEditViewModel(
     }
 
     private fun loadGame(id: String) {
-        _uiState.update { it.copy(isLoading = true, loadError = null) }
         viewModelScope.launch {
-            when (val result = repository.game(id)) {
-                is ApiResult.Success -> {
-                    val form = result.value.toForm()
-                    _uiState.update { it.copy(form = form, initialForm = form, isLoading = false) }
-                }
-                is ApiResult.Failure -> _uiState.update { it.copy(isLoading = false, loadError = result.error.toUiText()) }
+            val game = repository.game(id)
+            if (game != null) {
+                val form = game.toForm()
+                _uiState.update { it.copy(form = form, initialForm = form, isLoading = false) }
+            } else {
+                _uiState.update { it.copy(isLoading = false, loadError = UiText(R.string.error_game_not_found)) }
             }
         }
     }

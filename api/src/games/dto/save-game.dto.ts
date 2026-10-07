@@ -1,4 +1,9 @@
-import { ApiProperty, ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
+import {
+  ApiProperty,
+  ApiPropertyOptional,
+  ApiSchema,
+  PartialType,
+} from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import {
   IsBoolean,
@@ -11,6 +16,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  IsUUID,
   Matches,
   Max,
   MaxLength,
@@ -313,3 +319,28 @@ export class SaveGameDto {
   @MaxLength(5000)
   notes?: string | null;
 }
+
+/**
+ * Body of POST /games. Offline clients generate the id themselves, which also
+ * makes the call idempotent: repeating it returns the existing game unchanged.
+ */
+@ApiSchema({ name: 'CreateGameRequest' })
+export class CreateGameDto extends SaveGameDto {
+  @ApiPropertyOptional({
+    format: 'uuid',
+    description:
+      'Client-generated id. When a game with this id already exists, it is returned unchanged (200).',
+  })
+  @IsOptional()
+  @IsUUID()
+  id?: string;
+}
+
+/**
+ * Body of PATCH /games/{id}: only the fields present change. `null` clears an
+ * optional field; fields that cannot be empty reject `null`.
+ */
+@ApiSchema({ name: 'UpdateGameRequest' })
+export class UpdateGameDto extends PartialType(SaveGameDto, {
+  skipNullProperties: false,
+}) {}

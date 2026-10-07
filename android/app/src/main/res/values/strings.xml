@@ -27,6 +27,7 @@
     <string name="error_game_not_found">Game not found.</string>
     <string name="error_network">Can\'t connect to the server. Check your connection.</string>
     <string name="error_unknown">Something went wrong. Please try again.</string>
+    <string name="error_changes_rejected">Some changes were rejected by the server and have been undone.</string>
 
     <!-- Client-side validation -->
     <string name="validation_required">This field is required.</string>
@@ -78,7 +79,8 @@
     <string name="no_results_title">No games match your filters</string>
     <string name="no_results_message">Try changing your search or filters.</string>
     <string name="no_results_action">Reset search and filters</string>
-    <string name="list_load_more_error">Couldn\'t load more games.</string>
+    <string name="list_loading">Loading collection…</string>
+    <string name="list_load_error_title">Couldn\'t load your collection</string>
     <string name="game_deleted">Game deleted.</string>
     <string name="game_favorite">Favorite</string>
     <string name="cover_description">Cover of %1$s</string>
@@ -91,10 +93,24 @@
         <item quantity="one">Maximum %d character.</item>
         <item quantity="other">Maximum %d characters.</item>
     </plurals>
+    <plurals name="platforms_count">
+        <item quantity="one">%d platform</item>
+        <item quantity="other">%d platforms</item>
+    </plurals>
+    <plurals name="sync_unsynced_changes">
+        <item quantity="one">%d unsynced change</item>
+        <item quantity="other">%d unsynced changes</item>
+    </plurals>
     <plurals name="active_filters">
         <item quantity="one">%d active filter</item>
         <item quantity="other">%d active filters</item>
     </plurals>
+
+    <!-- Sync status -->
+    <string name="sync_syncing">Syncing…</string>
+    <string name="sync_offline">Offline</string>
+    <string name="sync_all_synced">All changes synced</string>
+    <string name="sync_not_synced_yet">Not synced yet</string>
 
     <!-- Active filter chips -->
     <string name="chip_favorites">Favorites</string>
@@ -212,9 +228,23 @@
     <string name="profile_title">Profile &amp; settings</string>
     <string name="profile_no_display_name">No display name</string>
     <string name="profile_member_since">Member since %1$s</string>
+    <string name="profile_collection">Collection</string>
+    <string name="profile_sync">Sync</string>
+    <string name="sync_status_label">Status</string>
+    <string name="sync_last_synced_label">Last synced</string>
+    <string name="sync_never">Never</string>
+    <string name="sync_just_now">Just now</string>
+    <string name="action_sync_now">Sync now</string>
     <string name="profile_security">Account &amp; security</string>
     <string name="action_change_password">Change password</string>
     <string name="action_logout">Sign out</string>
+    <string name="action_logout_anyway">Sign out anyway</string>
+    <string name="logout_title">Sign out?</string>
+    <string name="logout_message">Your collection stays on the server. You can sign in again at any time.</string>
+    <plurals name="logout_unsynced_warning">
+        <item quantity="one">%d change hasn\'t been synced yet. It will be lost if you sign out now.</item>
+        <item quantity="other">%d changes haven\'t been synced yet. They will be lost if you sign out now.</item>
+    </plurals>
     <string name="action_delete_account">Delete account</string>
     <string name="change_password_title">Change password</string>
     <string name="change_password_info">Changing your password signs you out on all other devices.</string>

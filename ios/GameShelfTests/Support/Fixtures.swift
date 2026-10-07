@@ -30,17 +30,13 @@ enum Fixtures {
         return Data("{\"statusCode\": \(status), \"code\": \"\(code)\", \"message\": \"Some English text\"\(detailsJSON)}".utf8)
     }
 
-    static let facetsJSON = Data("""
+    /// A page of the change feed with one game and one deletion.
+    static let changesJSON = Data("""
     {
-      "totalItems": 3,
-      "platforms": [{ "value": "PS2", "count": 2 }, { "value": "N64", "count": 1 }],
-      "statuses": [{ "value": "OWNED", "count": 3 }],
-      "genres": [],
-      "publishers": [],
-      "developers": [],
-      "storageLocations": [],
-      "releaseYearMin": 1998,
-      "releaseYearMax": null
+      "games": [\(gameJSON)],
+      "deletedIds": ["01a1163b-0cb1-75e9-bd4e-4a7feec69238"],
+      "cursor": "1234",
+      "hasMore": false
     }
     """.utf8)
 
@@ -78,6 +74,27 @@ enum Fixtures {
       "updatedAt": "2026-10-07T11:58:51Z"
     }
     """
+
+    /// The game of ``gameJSON``.
+    static var decodedGame: Game {
+        get throws { try JSONDecoder.api().decode(Game.self, from: Data(gameJSON.utf8)) }
+    }
+
+    /// A game with defaults for everything but the title; `configure` sets what a test is about.
+    static func game(
+        _ title: String,
+        _ platform: Platform = .pc,
+        id: Game.ID = UUID().uuidString.lowercased(),
+        configure: (inout Game) -> Void = { _ in }
+    ) -> Game {
+        var game = Game(
+            id: id,
+            values: SaveGameRequest(title: title, platform: platform),
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+        configure(&game)
+        return game
+    }
 
     static func storedSession(access: String = "old-access", refresh: String = "old-refresh") -> StoredSession {
         StoredSession(accessToken: access, refreshToken: refresh, user: user)

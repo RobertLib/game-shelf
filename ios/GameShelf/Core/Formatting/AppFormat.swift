@@ -30,6 +30,16 @@ enum AppFormat {
         date.formatted(Date.FormatStyle(date: .abbreviated, time: .shortened, locale: locale))
     }
 
+    /// `"5 minutes ago"`, `"now"`, `"yesterday"` …
+    static func relativeTime(_ date: Date, now: Date = .now, locale: Locale = .current) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.locale = locale
+        formatter.unitsStyle = .full
+        formatter.dateTimeStyle = .named
+        // A sync that finished a moment ago must not read as "in 0 seconds".
+        return formatter.localizedString(for: min(date, now), relativeTo: now)
+    }
+
     /// `"1990–1999"`, `"from 1990"` or `"to 1999"`.
     static func range(from lower: String?, to upper: String?) -> String {
         switch (lower, upper) {

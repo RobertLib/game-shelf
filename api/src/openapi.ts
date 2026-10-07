@@ -2,6 +2,7 @@ import type { INestApplication } from '@nestjs/common';
 import {
   DocumentBuilder,
   type OpenAPIObject,
+  type SchemaObject,
   SwaggerModule,
 } from '@nestjs/swagger';
 
@@ -19,5 +20,12 @@ export function createOpenApiDocument(app: INestApplication): OpenAPIObject {
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' })
     .build();
 
-  return SwaggerModule.createDocument(app, config);
+  const document = SwaggerModule.createDocument(app, config);
+  // PATCH leaves omitted fields unchanged, so the defaults it inherits from SaveGameRequest do not apply.
+  const update = document.components?.schemas?.UpdateGameRequest as
+    SchemaObject | undefined;
+  for (const property of Object.values(update?.properties ?? {})) {
+    delete (property as SchemaObject).default;
+  }
+  return document;
 }

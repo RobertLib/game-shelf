@@ -4,28 +4,39 @@ import Foundation
 @MainActor
 final class AppContainer {
     let session: SessionStore
-    let games: any GameService
+    /// The offline collection (``SyncEngine/repository``) and its sync.
+    let sync: SyncEngine
 
-    init(session: SessionStore, games: any GameService) {
+    init(session: SessionStore, sync: SyncEngine) {
         self.session = session
-        self.games = games
+        self.sync = sync
     }
 
     static func live() -> AppContainer {
         let storage = KeychainSessionStorage()
         clearKeychainAfterReinstall(storage)
         #if DEBUG
-        if DebugLaunchOptions.current.resetSession {
+        let erasesLocalData = DebugLaunchOptions.current.resetSession
+        if erasesLocalData {
             storage.clear()
         }
+        #else
+        let erasesLocalData = false
         #endif
 
         let restored = storage.load()
         let tokens = TokenManager(storage: storage, session: restored)
         let api = APIClient(baseURL: AppConfiguration.apiBaseURL, tokens: tokens)
+        let repository = GameRepository(store: GameStore.makeDefault(erasingExisting: erasesLocalData), status: SyncStatus())
+        let sync = SyncEngine(repository: repository, api: RemoteGameAPI(api: api))
         return AppContainer(
-            session: SessionStore(auth: RemoteAuthService(api: api), tokens: tokens, restoredSession: restored),
-            games: RemoteGameService(api: api)
+            session: SessionStore(
+                auth: RemoteAuthService(api: api),
+                tokens: tokens,
+                restoredSession: restored,
+                userData: sync
+            ),
+            sync: sync
         )
     }
 

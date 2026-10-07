@@ -43,62 +43,6 @@ struct GameFilter: Hashable, Sendable {
     var activeCount: Int { chips.count }
 }
 
-// MARK: - Query
-
-extension GameFilter {
-    /// Query parameters for `GET games`. Multi-value criteria are sent as repeated
-    /// parameters in a stable order.
-    var queryItems: [URLQueryItem] {
-        var items: [URLQueryItem] = []
-
-        func appendEach<Value: APIEnum>(_ name: String, _ selection: Set<Value>) {
-            for value in Value.allCases where selection.contains(value) {
-                items.append(URLQueryItem(name: name, value: value.rawValue))
-            }
-        }
-        func append(_ name: String, _ value: String?) {
-            guard let value else { return }
-            items.append(URLQueryItem(name: name, value: value))
-        }
-        func appendText(_ name: String, _ text: String) {
-            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !trimmed.isEmpty { append(name, trimmed) }
-        }
-
-        appendEach("platform", platforms)
-        appendEach("status", statuses)
-        appendEach("format", formats)
-        appendEach("region", regions)
-        appendEach("completeness", completeness)
-        appendEach("condition", conditions)
-        appendEach("playStatus", playStatuses)
-        for genre in genres.sorted() {
-            append("genre", genre)
-        }
-        appendText("publisher", publisher)
-        appendText("developer", developer)
-        appendText("storageLocation", storageLocation)
-        if favoritesOnly {
-            append("favorite", "true")
-        }
-        switch cover {
-        case .any: break
-        case .withCover: append("hasCover", "true")
-        case .withoutCover: append("hasCover", "false")
-        }
-        append("releaseYearFrom", releaseYearFrom.map(String.init))
-        append("releaseYearTo", releaseYearTo.map(String.init))
-        append("purchaseDateFrom", purchaseDateFrom?.description)
-        append("purchaseDateTo", purchaseDateTo?.description)
-        append("purchasePriceMin", purchasePriceMin?.description)
-        append("purchasePriceMax", purchasePriceMax?.description)
-        append("estimatedValueMin", estimatedValueMin?.description)
-        append("estimatedValueMax", estimatedValueMax?.description)
-        append("ratingMin", ratingMin.map(String.init))
-        return items
-    }
-}
-
 // MARK: - Chips
 
 struct FilterChip: Identifiable, Hashable, Sendable {
@@ -215,30 +159,15 @@ extension GameFilter {
 
 // MARK: - List query
 
-/// Everything that determines the content of the collection list, except paging.
+/// Everything that determines the content of the collection list.
 struct GameListQuery: Hashable, Sendable {
-    static let defaultPageSize = 25
-
     var search = ""
     var filter = GameFilter()
     var sort: GameSortField = .title
     var order: SortOrder = .asc
 
+    /// A search or filter narrows the results.
     var isFiltered: Bool {
         !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !filter.isEmpty
-    }
-
-    func queryItems(page: Int, pageSize: Int = defaultPageSize) -> [URLQueryItem] {
-        var items: [URLQueryItem] = []
-        let search = search.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !search.isEmpty {
-            items.append(URLQueryItem(name: "q", value: search))
-        }
-        items += filter.queryItems
-        items.append(URLQueryItem(name: "sort", value: sort.rawValue))
-        items.append(URLQueryItem(name: "order", value: order.rawValue))
-        items.append(URLQueryItem(name: "page", value: String(page)))
-        items.append(URLQueryItem(name: "pageSize", value: String(pageSize)))
-        return items
     }
 }

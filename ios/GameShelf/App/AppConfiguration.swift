@@ -8,6 +8,10 @@ enum AppConfiguration {
         else {
             preconditionFailure("GSAPIBaseURL is missing in Info.plist; set the API_BASE_URL build setting.")
         }
+        // Debug builds on a physical device take the host from DEV_API_HOST (ios/Config/Local.xcconfig).
+        guard url.host()?.isEmpty == false else {
+            preconditionFailure("GSAPIBaseURL \(value) has no host; run `make ios-device-host` to point device builds at this Mac.")
+        }
         return url
     }()
 

@@ -11,4 +11,17 @@ enum Pluralization {
     static func games(_ count: Int, locale: Locale = .current) -> String {
         format(count, one: "game", other: "games", locale: locale)
     }
+
+    /// "3 unsynced changes" (sync status).
+    static func unsyncedChanges(_ count: Int, locale: Locale = .current) -> String {
+        format(count, one: "unsynced change", other: "unsynced changes", locale: locale)
+    }
+
+    /// Warning of the sign-out confirmation when changes would be lost.
+    static func signOutWarning(unsyncedChanges count: Int, locale: Locale = .current) -> String {
+        let changes = format(count, one: "change", other: "changes", locale: locale)
+        return count == 1
+            ? "\(changes) hasn't been synced yet. It will be lost if you sign out now."
+            : "\(changes) haven't been synced yet. They will be lost if you sign out now."
+    }
 }

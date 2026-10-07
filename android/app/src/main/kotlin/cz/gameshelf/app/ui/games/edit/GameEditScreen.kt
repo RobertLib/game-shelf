@@ -66,7 +66,6 @@ fun GameEditRoute(
         onFormChange = viewModel::updateForm,
         onSave = viewModel::save,
         onClose = viewModel::requestClose,
-        onRetry = viewModel::retryLoad,
     )
 
     if (state.showDiscardDialog) {
@@ -90,7 +89,6 @@ fun GameEditScreen(
     onFormChange: ((GameForm) -> GameForm) -> Unit,
     onSave: () -> Unit,
     onClose: () -> Unit,
-    onRetry: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -125,7 +123,6 @@ fun GameEditScreen(
             state.isLoading -> LoadingContent(Modifier.padding(padding))
             state.loadError != null -> ErrorContent(
                 message = state.loadError.asString(),
-                onRetry = onRetry,
                 modifier = Modifier.padding(padding),
             )
             else -> GameFormContent(
@@ -155,7 +152,6 @@ private fun GameEditScreenPreview() {
             onFormChange = {},
             onSave = {},
             onClose = {},
-            onRetry = {},
         )
     }
 }

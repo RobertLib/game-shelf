@@ -1,21 +1,36 @@
 import SwiftUI
 
 struct GameDetailView: View {
-    let service: any GameService
-
     @State private var model: GameDetailViewModel
     @State private var isEditing = false
     @State private var isConfirmingDelete = false
     @Environment(\.dismiss) private var dismiss
 
-    init(game: Game, service: any GameService, onChange: @escaping @MainActor (GameChange) -> Void) {
-        self.service = service
-        _model = State(initialValue: GameDetailViewModel(game: game, service: service, onChange: onChange))
+    init(gameID: Game.ID, repository: GameRepository) {
+        _model = State(initialValue: GameDetailViewModel(gameID: gameID, repository: repository))
     }
 
-    private var game: Game { model.game }
-
     var body: some View {
+        Group {
+            if let game = model.game {
+                content(game)
+            } else if !model.isDeleted {
+                ContentUnavailableView(
+                    "Game not found.",
+                    systemImage: "questionmark.square.dashed",
+                    description: Text("This game has been removed from your collection.")
+                )
+            }
+        }
+        .alert(
+            "Something went wrong",
+            isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } }),
+            actions: { Button("OK", role: .cancel) {} },
+            message: { Text(model.errorMessage ?? "") }
+        )
+    }
+
+    private func content(_ game: Game) -> some View {
         List {
             Section {
                 GameDetailHeader(game: game)
@@ -23,10 +38,10 @@ struct GameDetailView: View {
             .listRowBackground(Color.clear)
             .listRowInsets(EdgeInsets())
 
-            DetailSection(title: "Basics", items: basicItems)
-            DetailSection(title: "Collector details", items: collectorItems)
-            DetailSection(title: "Purchase & value", items: purchaseItems)
-            DetailSection(title: "Other", items: otherItems)
+            DetailSection(title: "Basics", items: basicItems(game))
+            DetailSection(title: "Collector details", items: collectorItems(game))
+            DetailSection(title: "Purchase & value", items: purchaseItems(game))
+            DetailSection(title: "Other", items: otherItems(game))
 
             Section {
                 Button(role: .destructive) {
@@ -35,7 +50,6 @@ struct GameDetailView: View {
                     Label("Delete game", systemImage: "trash")
                         .foregroundStyle(.red)
                 }
-                .disabled(model.isDeleting)
             } footer: {
                 Text("Added \(AppFormat.timestamp(game.createdAt)) · Last modified \(AppFormat.timestamp(game.updatedAt))")
             }
@@ -43,23 +57,7 @@ struct GameDetailView: View {
         .listStyle(.insetGrouped)
         .navigationTitle(game.title)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { toolbar }
-        .overlay {
-            if model.isMissing {
-                ContentUnavailableView(
-                    "Game not found",
-                    systemImage: "questionmark.square.dashed",
-                    description: Text("This game has been removed from your collection.")
-                )
-                .background(Color(.systemGroupedBackground))
-            }
-        }
-        .refreshable {
-            await model.refresh(userInitiated: true)
-        }
-        .task {
-            await model.refresh(userInitiated: false)
-        }
+        .toolbar { toolbar(game) }
         .confirmationDialog("Delete game?", isPresented: $isConfirmingDelete, titleVisibility: .visible) {
             Button("Delete game", role: .destructive) {
                 Task {
@@ -72,16 +70,8 @@ struct GameDetailView: View {
             Text("“\(game.title)” will be permanently removed from your collection.")
         }
         .sheet(isPresented: $isEditing) {
-            GameFormView(mode: .edit(game), service: service) { saved in
-                model.didSave(saved)
-            }
+            GameFormView(mode: .edit(game), repository: model.repository)
         }
-        .alert(
-            "Something went wrong",
-            isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } }),
-            actions: { Button("OK", role: .cancel) {} },
-            message: { Text(model.errorMessage ?? "") }
-        )
         #if DEBUG
         .task {
             if DebugLaunchOptions.current.consume(.edit) {
@@ -92,7 +82,7 @@ struct GameDetailView: View {
     }
 
     @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
+    private func toolbar(_ game: Game) -> some ToolbarContent {
         ToolbarItemGroup(placement: .topBarTrailing) {
             Button {
                 Task { await model.toggleFavorite() }
@@ -103,19 +93,17 @@ struct GameDetailView: View {
                 )
             }
             .tint(game.favorite ? .yellow : nil)
-            .disabled(model.isUpdatingFavorite || model.isMissing)
             .sensoryFeedback(.selection, trigger: game.favorite)
 
             Button("Edit") {
                 isEditing = true
             }
-            .disabled(model.isMissing)
         }
     }
 
     // MARK: Sections
 
-    private var basicItems: [DetailItem] {
+    private func basicItems(_ game: Game) -> [DetailItem] {
         [
             DetailItem("Platform", game.platform.label),
             DetailItem("Edition", game.edition),
@@ -126,7 +114,7 @@ struct GameDetailView: View {
         ]
     }
 
-    private var collectorItems: [DetailItem] {
+    private func collectorItems(_ game: Game) -> [DetailItem] {
         [
             DetailItem("Status", game.status.label),
             DetailItem("Format", game.format.label),
@@ -140,7 +128,7 @@ struct GameDetailView: View {
         ]
     }
 
-    private var purchaseItems: [DetailItem] {
+    private func purchaseItems(_ game: Game) -> [DetailItem] {
         [
             DetailItem("Purchase price", game.purchasePrice.map { AppFormat.currency($0, code: game.currency) }),
             DetailItem("Estimated value", game.estimatedValue.map { AppFormat.currency($0, code: game.currency) }),
@@ -149,7 +137,7 @@ struct GameDetailView: View {
         ]
     }
 
-    private var otherItems: [DetailItem] {
+    private func otherItems(_ game: Game) -> [DetailItem] {
         [
             DetailItem("Play status", game.playStatus?.label),
             DetailItem("Rating", game.rating.map { "\($0)/10" }),
@@ -250,9 +238,10 @@ private struct GameDetailHeader: View {
 
 #if DEBUG
 #Preview {
+    let sync = SyncEngine.preview()
     NavigationStack {
-        GameDetailView(game: PreviewData.games[0], service: PreviewGameService()) { _ in }
+        GameDetailView(gameID: PreviewData.games[0].id, repository: sync.repository)
     }
-    .environment(FacetsStore(service: PreviewGameService(), facets: PreviewData.facets))
+    .environment(FacetsStore(repository: sync.repository))
 }
 #endif

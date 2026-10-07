@@ -36,6 +36,17 @@ class PluralsTest {
     }
 
     @Test
+    fun `unsynced changes`() {
+        fun unsynced(count: Int) = resources.getQuantityString(R.plurals.sync_unsynced_changes, count, count)
+        fun warning(count: Int) = resources.getQuantityString(R.plurals.logout_unsynced_warning, count, count)
+
+        assertEquals("1 unsynced change", unsynced(1))
+        assertEquals("3 unsynced changes", unsynced(3))
+        assertEquals("1 change hasn't been synced yet. It will be lost if you sign out now.", warning(1))
+        assertEquals("3 changes haven't been synced yet. They will be lost if you sign out now.", warning(3))
+    }
+
+    @Test
     fun `plural text resolves through UiText`() {
         assertEquals("Maximum 1 character.", UiText.plural(R.plurals.validation_too_long, 1).resolve(resources))
         assertEquals("Maximum 200 characters.", UiText.plural(R.plurals.validation_too_long, 200).resolve(resources))

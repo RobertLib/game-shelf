@@ -6,11 +6,14 @@ enum ErrorMessage {
     static let generic = "Something went wrong. Please try again."
     static let network = "Can't connect to the server. Check your connection."
     static let sessionExpired = "Your session has expired. Please sign in again."
+    /// The sync engine undid local changes the server rejected permanently.
+    static let changesRejected = "Some changes were rejected by the server and have been undone."
 
     static func message(for error: any Error) -> String {
         switch error {
         case let error as APIError: message(for: error)
         case is URLError: network
+        case LocalStoreError.gameNotFound: message(for: .gameNotFound)
         default: generic
         }
     }

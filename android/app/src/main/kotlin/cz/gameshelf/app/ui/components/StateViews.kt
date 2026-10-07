@@ -2,7 +2,6 @@ package cz.gameshelf.app.ui.components
 
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,21 +26,39 @@ import cz.gameshelf.app.R
 import cz.gameshelf.app.ui.theme.GameShelfTheme
 
 @Composable
-fun LoadingContent(modifier: Modifier = Modifier) {
-    Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+fun LoadingContent(modifier: Modifier = Modifier, message: String? = null) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(32.dp),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
         CircularProgressIndicator()
+        if (message != null) {
+            Spacer(Modifier.height(16.dp))
+            Text(
+                message,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
+/** The [message] alone, or under a [title] when one is given. */
 @Composable
 fun ErrorContent(
     message: String,
     modifier: Modifier = Modifier,
+    title: String? = null,
     onRetry: (() -> Unit)? = null,
 ) {
     MessageContent(
         iconRes = R.drawable.ic_cloud_off,
-        title = message,
+        title = title ?: message,
+        message = message.takeIf { title != null },
         modifier = modifier,
         action = onRetry?.let { retry ->
             { OutlinedButton(onClick = retry) { Text(stringResource(R.string.action_retry)) } }

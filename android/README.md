@@ -60,14 +60,29 @@ The release build is minified with R8; signing is not configured in the reposito
 - **MVVM**: ViewModels expose immutable `StateFlow<…UiState>`; one-off events (snackbars,
   navigation) go through a `Channel` and are collected only while the screen is STARTED.
   Search, filters and sort live in the list ViewModel, so they survive opening a detail and rotation.
-- **Repositories** (`data/auth`, `data/games`) sit between ViewModels and the API and return
-  `ApiResult` with an `AppError`, which the UI maps to messages by error `code`. Successful game
-  changes are broadcast via `GamesRepository.changes`, so the list and detail refresh themselves.
+- **Offline-first** ([`../docs/offline-sync.md`](../docs/offline-sync.md)): the collection lives in a
+  Room database (`data/local`; each game is stored as its `Game` JSON, all querying is in memory).
+  `GamesRepository` reads and writes only that database – every edit is saved locally at once
+  together with a pending change (`data/sync/PendingChange`, field-level diff in `GameFields`) and
+  then asks for a sync. Screens observe the database, so they update by themselves.
+- **Sync** (`data/sync/SyncEngine`): single-flight runs that push pending changes (`POST` with a
+  client-generated id, `PATCH` of the changed fields, `DELETE`) and pull `GET games/changes`, each
+  page in one transaction with its cursor. It runs after sign-in, on app start / foreground, when the
+  network comes back, after every local change, on pull-to-refresh and "Sync now", and retries
+  temporary failures with exponential backoff (2 s … 5 min) while in the foreground. The local data
+  belongs to one user: signing in as someone else, signing out and deleting the account wipe it; an
+  expired session keeps it. `SyncController` exposes the status (syncing / offline / unsynced
+  changes / last synced) and "changes rejected" events to the UI.
+- **Search, filters, sort and facets** are computed on the device (`domain/collection`) with the
+  semantics of the API's `GET games` / `GET games/facets`, off the main thread.
+- **Auth repository** (`data/auth`) returns `ApiResult` with an `AppError`, which the UI maps to
+  messages by error `code`.
 - **Networking**: Retrofit + OkHttp + kotlinx.serialization. `AuthInterceptor` adds the bearer token,
   `TokenAuthenticator` refreshes the tokens on 401 (single-flight via a `Mutex`, one retry).
   API enums tolerate unknown values (`OTHER`/`UNKNOWN`); money amounts are `BigDecimal`.
 - **Tokens** are stored in Preferences DataStore, encrypted with an AES/GCM key from the Android
   Keystore; the file is excluded from backups and device transfers.
+- **Room schema** is exported to `app/schemas/` (baseline for future migrations).
 - **Manual DI**: `AppContainer` is created by `GameShelfApplication`; ViewModels are built with
   `viewModelFactory { initializer { … } }`. Images are loaded by Coil 3 over a shared OkHttp client.
 - The UI is English only. Numbers, prices (always in the game's currency) and dates follow the
@@ -79,15 +94,18 @@ The release build is minified with R8; signing is not configured in the reposito
 cz.gameshelf.app
 ├── data/api        Retrofit interfaces, DTOs, JSON, interceptor + authenticator, error mapping
 ├── data/auth       session (Keystore + DataStore), AuthRepository
-├── data/games      GamesRepository, filter → query parameter mapping
+├── data/local      Room database (games, pending changes, sync state), LocalGameStore
+├── data/sync       SyncEngine, pending changes, field diff, network / foreground monitors
+├── data/games      GamesRepository (local reads and writes)
 ├── di              AppContainer
-├── domain/model    API models (Game, GamePage, GameFacets, enums), filters, errors
+├── domain/model    API models (Game, GameFacets, enums), filters, errors
+├── domain/collection  local search / filter / sort engine and facets
 ├── ui/auth         sign in, create account
-├── ui/games/list   paged list with sorting and active filter chips
+├── ui/games/list   collection list with sorting, active filter chips and sync status
 ├── ui/games/filter filter bottom sheet
 ├── ui/games/detail game detail
 ├── ui/games/edit   add / edit form
-├── ui/profile      profile, change password, delete account
+├── ui/profile      profile, collection size, sync status, change password, sign out, delete account
 ├── ui/components   shared components (fields, dropdowns, states)
 ├── ui/common       texts, formatting, enum labels and error messages
 └── ui/theme        Material 3 theme (dynamic color + custom light/dark fallback scheme)

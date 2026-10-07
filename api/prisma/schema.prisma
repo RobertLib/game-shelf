@@ -17,6 +17,8 @@ model User {
   displayName       String?
   /// Access tokens issued before this moment are rejected.
   passwordChangedAt DateTime?
+  /// Last change number handed out to this user's games (see `Game.version`).
+  gamesVersion      Int       @default(0)
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
@@ -42,12 +44,12 @@ model RefreshToken {
 }
 
 model Game {
-  id              String            @id @default(uuid(7)) @db.Uuid
-  userId          String            @db.Uuid
+  id              String           @id @default(uuid(7)) @db.Uuid
+  userId          String           @db.Uuid
   title           String
   platform        Platform
-  status          CollectionStatus  @default(OWNED)
-  format          GameFormat        @default(PHYSICAL)
+  status          CollectionStatus @default(OWNED)
+  format          GameFormat       @default(PHYSICAL)
   region          Region?
   edition         String?
   completeness    Completeness?
@@ -61,24 +63,31 @@ model Game {
   barcode         String?
   /// Catalogue / serial number printed on the media or spine, e.g. SLES-50330.
   productCode     String?
-  quantity        Int               @default(1)
-  purchasePrice   Decimal?          @db.Decimal(12, 2)
-  purchaseDate    DateTime?         @db.Date
+  quantity        Int              @default(1)
+  purchasePrice   Decimal?         @db.Decimal(12, 2)
+  purchaseDate    DateTime?        @db.Date
   purchasePlace   String?
-  estimatedValue  Decimal?          @db.Decimal(12, 2)
+  estimatedValue  Decimal?         @db.Decimal(12, 2)
   /// ISO 4217 code that both prices are expressed in.
-  currency        String            @default("CZK") @db.Char(3)
+  currency        String           @default("CZK") @db.Char(3)
   storageLocation String?
   /// Personal rating 1–10.
-  rating          Int?              @db.SmallInt
-  favorite        Boolean           @default(false)
+  rating          Int?             @db.SmallInt
+  favorite        Boolean          @default(false)
   coverImageUrl   String?
   notes           String?
-  createdAt       DateTime          @default(now())
-  updatedAt       DateTime          @updatedAt
+  /// Number of the last change (create, update or delete) within the owner's games, taken from
+  /// `User.gamesVersion`. The change feed for offline clients is ordered by it.
+  version         Int
+  /// Set when the game is deleted. The row stays as a tombstone so that other devices learn about
+  /// the deletion from the change feed; everything else treats it as non-existent.
+  deletedAt       DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@unique([userId, version])
   @@index([userId, title])
   @@index([userId, platform])
   @@index([userId, createdAt])

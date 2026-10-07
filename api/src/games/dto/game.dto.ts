@@ -111,6 +111,8 @@ export class GameDto {
   static from(game: Game): GameDto {
     const {
       userId: _userId,
+      version: _version,
+      deletedAt: _deletedAt,
       purchasePrice,
       estimatedValue,
       purchaseDate,

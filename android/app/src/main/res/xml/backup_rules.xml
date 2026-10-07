@@ -2,4 +2,5 @@
 <!-- Android 11 and lower (backups are also disabled via allowBackup="false"). -->
 <full-backup-content>
     <exclude domain="file" path="datastore/" />
+    <exclude domain="database" path="." />
 </full-backup-content>

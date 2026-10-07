@@ -1,16 +1,13 @@
 package cz.gameshelf.app.domain.model
 
 import cz.gameshelf.app.domain.serialization.apiEnumOrNull
-import kotlinx.serialization.Serializable
 
-@Serializable
 data class FacetValue(
     val value: String,
     val count: Int,
 )
 
-/** Distinct values in the user's collection with counts (OpenAPI `GameFacets`). */
-@Serializable
+/** Distinct values in the user's collection with counts, in the shape of the API's `GameFacets`. */
 data class GameFacets(
     val totalItems: Int,
     val platforms: List<FacetValue>,

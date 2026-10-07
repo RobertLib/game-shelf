@@ -1,14 +1,13 @@
 import Foundation
 import Observation
 
-/// State of the collection list: query (search, filters, sort), loaded pages and
-/// loading/error states. Lives as long as the main flow, so filters and sort
-/// survive navigation to the detail and back.
+/// State of the collection list: the query (search, filters, sort) and its results, computed
+/// from the local collection. Lives as long as the main flow, so filters and sort survive
+/// navigation to the detail and back.
 @Observable
 @MainActor
 final class GameListViewModel {
     enum Phase: Equatable {
-        case idle
         case loading
         case loaded
         case failed(String)
@@ -21,40 +20,63 @@ final class GameListViewModel {
         var id: Self { self }
     }
 
+    /// What the results are computed from; when it changes, the results are recomputed.
+    struct ResultsKey: Hashable {
+        var query: GameListQuery
+        var collectionVersion: Int
+    }
+
     /// Text in the search field; applied to ``query`` after debouncing.
     var searchText = ""
-    /// Error of a refresh that kept the previous results on screen.
+    /// Error of a pull-to-refresh sync; the list stays on screen.
     var refreshError: String?
     var presentedSheet: Sheet?
 
     private(set) var query = GameListQuery()
+    /// Games matching ``query``, in display order.
     private(set) var games: [Game] = []
-    private(set) var totalItems = 0
-    private(set) var phase: Phase = .idle
-    private(set) var isReloading = false
-    private(set) var isLoadingNextPage = false
-    private(set) var nextPageError: String?
+    /// The user asked to retry the failed first sync.
+    private(set) var isRetrying = false
+    private var resultsComputedFor: ResultsKey?
 
-    @ObservationIgnored private let service: any GameService
-    @ObservationIgnored private var loadedQuery: GameListQuery?
-    @ObservationIgnored private var currentPage = 0
-    @ObservationIgnored private var totalPages = 0
-    @ObservationIgnored private var loadGeneration = 0
-    @ObservationIgnored private var nextPageTask: Task<Void, Never>?
+    let sync: SyncEngine
 
-    init(service: any GameService) {
-        self.service = service
+    init(sync: SyncEngine) {
+        self.sync = sync
     }
 
-    var hasMorePages: Bool { currentPage < totalPages }
+    var repository: GameRepository { sync.repository }
+    var syncStatus: SyncStatus { sync.status }
 
-    /// The whole collection is empty (as opposed to nothing matching the filters).
+    var resultsKey: ResultsKey {
+        ResultsKey(query: query, collectionVersion: repository.version)
+    }
+
+    /// Until the first complete sync, an empty collection shows loading (or the failure of that
+    /// sync) rather than the empty state.
+    var phase: Phase {
+        guard repository.isLoaded else { return .loading }
+        if repository.isEmpty, !syncStatus.hasCompletedInitialSync {
+            if !isRetrying, let message = syncStatus.lastErrorMessage {
+                return .failed(message)
+            }
+            return .loading
+        }
+        return resultsComputedFor == nil ? .loading : .loaded
+    }
+
+    /// Nothing to show without a search or filter: the collection is empty.
     var isCollectionEmpty: Bool {
-        phase == .loaded && games.isEmpty && loadedQuery?.isFiltered == false
+        phase == .loaded && games.isEmpty && !shownQueryIsFiltered
     }
 
+    /// Nothing matches the search or filters (even if the collection itself is empty).
     var hasNoResults: Bool {
-        phase == .loaded && games.isEmpty && loadedQuery?.isFiltered == true
+        phase == .loaded && games.isEmpty && shownQueryIsFiltered
+    }
+
+    private var shownQueryIsFiltered: Bool {
+        resultsComputedFor?.query.isFiltered ?? false
     }
 
     // MARK: Query
@@ -91,113 +113,45 @@ final class GameListViewModel {
         query.order = order
     }
 
-    // MARK: Loading
+    // MARK: Results
 
-    /// Loads the first page unless the current query is already on screen.
-    func loadIfNeeded() async {
-        guard loadedQuery != query else { return }
-        await reload()
+    /// Recomputes the results for the current query and collection. Filtering and sorting run off
+    /// the main actor; a result that is outdated by the time it is ready is dropped.
+    func updateResults() async {
+        let key = resultsKey
+        guard key != resultsComputedFor else { return }
+        guard let results = await Self.results(of: key.query, in: Array(repository.games)),
+              key == resultsKey
+        else { return }
+        games = results
+        resultsComputedFor = key
     }
 
-    /// Loads the first page of the current query (initial load, query change, pull-to-refresh).
-    func reload() async {
-        let query = query
-        loadGeneration += 1
-        let generation = loadGeneration
-        nextPageTask?.cancel()
-        nextPageTask = nil
-        isLoadingNextPage = false
-        nextPageError = nil
+    /// `nil` when the calling task was cancelled (a newer query or collection replaced it).
+    @concurrent
+    private nonisolated static func results(of query: GameListQuery, in games: [Game]) async -> [Game]? {
+        guard !Task.isCancelled else { return nil }
+        let results = query.results(in: games)
+        return Task.isCancelled ? nil : results
+    }
 
-        let showsPlaceholder = games.isEmpty || phase != .loaded
-        if showsPlaceholder {
-            phase = .loading
-        } else {
-            isReloading = true
-        }
+    // MARK: Sync
 
+    /// Pull-to-refresh: syncs and reports a failure; the list stays as it is.
+    func refresh() async {
         do {
-            let page = try await service.games(matching: query, page: 1)
-            guard generation == loadGeneration else { return }
-            games = page.items
-            totalItems = page.totalItems
-            currentPage = page.page
-            totalPages = page.totalPages
-            loadedQuery = query
-            phase = .loaded
+            try await sync.syncNow()
         } catch {
-            guard generation == loadGeneration else { return }
-            if ErrorMessage.isCancellation(error) {
-                // The view went away or the query changed; the next task starts over.
-                if phase == .loading { phase = .idle }
-            } else if loadedQuery == query, !games.isEmpty {
+            if !ErrorMessage.isCancellation(error) {
                 refreshError = ErrorMessage.message(for: error)
-            } else {
-                games = []
-                loadedQuery = nil
-                currentPage = 0
-                totalPages = 0
-                phase = .failed(ErrorMessage.message(for: error))
             }
         }
-        isReloading = false
     }
 
-    /// Infinite scroll: starts loading the next page when one of the last rows appears.
-    func loadMoreIfNeeded(after game: Game) {
-        guard let index = games.lastIndex(where: { $0.id == game.id }),
-              index >= games.count - 5
-        else { return }
-        loadNextPage()
-    }
-
-    func loadNextPage() {
-        guard hasMorePages, !isLoadingNextPage, nextPageError == nil,
-              let query = loadedQuery, query == self.query
-        else { return }
-
-        isLoadingNextPage = true
-        let generation = loadGeneration
-        let page = currentPage + 1
-        nextPageTask = Task {
-            do {
-                let result = try await service.games(matching: query, page: page)
-                guard generation == loadGeneration else { return }
-                let known = Set(games.map(\.id))
-                games += result.items.filter { !known.contains($0.id) }
-                totalItems = result.totalItems
-                currentPage = result.page
-                totalPages = result.totalPages
-            } catch {
-                guard generation == loadGeneration, !ErrorMessage.isCancellation(error) else { return }
-                nextPageError = ErrorMessage.message(for: error)
-            }
-            isLoadingNextPage = false
-        }
-    }
-
-    func retryNextPage() {
-        nextPageError = nil
-        loadNextPage()
-    }
-
-    // MARK: Changes from other screens
-
-    func apply(_ change: GameChange) {
-        switch change {
-        case .created:
-            // The new game's position depends on sort and filters; reload from the start.
-            loadedQuery = nil
-            Task { await reload() }
-        case .updated(let game):
-            if let index = games.firstIndex(where: { $0.id == game.id }) {
-                games[index] = game
-            }
-        case .deleted(let id):
-            if let index = games.firstIndex(where: { $0.id == id }) {
-                games.remove(at: index)
-                totalItems = max(0, totalItems - 1)
-            }
-        }
+    /// "Try again" after the first sync failed.
+    func retry() async {
+        isRetrying = true
+        defer { isRetrying = false }
+        try? await sync.syncNow()
     }
 }

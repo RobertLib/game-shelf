@@ -7,11 +7,12 @@ import cz.gameshelf.app.domain.serialization.LocalDateSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.UseSerializers
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 
 /**
- * Body of `POST games` and `PUT games/{id}` (OpenAPI `SaveGameRequest`). PUT is a full replacement,
- * so the API JSON is configured to always emit every property, including defaults and nulls.
+ * The editable fields of a game (OpenAPI `SaveGameRequest`). The form produces it; the sync sends it
+ * whole in `POST games` and field by field in `PATCH games/{id}`.
  */
 @Serializable
 data class SaveGameRequest(
@@ -74,4 +75,37 @@ fun Game.toSaveRequest(): SaveGameRequest = SaveGameRequest(
     favorite = favorite,
     coverImageUrl = coverImageUrl,
     notes = notes,
+)
+
+/** A game created on the device; the server's timestamps replace [now] after sync. */
+fun SaveGameRequest.toNewGame(id: String, now: Instant): Game = Game(
+    id = id,
+    title = title,
+    platform = platform,
+    status = status,
+    format = format,
+    region = region,
+    edition = edition,
+    completeness = completeness,
+    condition = condition,
+    playStatus = playStatus,
+    genre = genre,
+    developer = developer,
+    publisher = publisher,
+    releaseYear = releaseYear,
+    barcode = barcode,
+    productCode = productCode,
+    quantity = quantity,
+    purchasePrice = purchasePrice,
+    purchaseDate = purchaseDate,
+    purchasePlace = purchasePlace,
+    estimatedValue = estimatedValue,
+    currency = currency,
+    storageLocation = storageLocation,
+    rating = rating,
+    favorite = favorite,
+    coverImageUrl = coverImageUrl,
+    notes = notes,
+    createdAt = now,
+    updatedAt = now,
 )

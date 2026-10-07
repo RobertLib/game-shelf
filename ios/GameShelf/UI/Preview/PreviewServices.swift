@@ -1,25 +1,23 @@
 #if DEBUG
 import Foundation
 
-/// In-memory game service for previews; supports simple title search and paging.
-struct PreviewGameService: GameService {
-    var games: [Game]
+/// Game API for previews: the first pull returns `games`; every change is accepted.
+struct PreviewGameAPI: GameAPI {
+    var games: [Game] = PreviewData.games
 
-    init(games: [Game] = PreviewData.games) {
-        self.games = games
+    func changes(after cursor: String?, limit: Int) async throws -> GameChanges {
+        GameChanges(games: cursor == nil ? games : [], deletedIds: [], cursor: "1", hasMore: false)
     }
 
-    func games(matching query: GameListQuery, page: Int) async throws -> GamePage {
-        let matching = games.filter { query.search.isEmpty || $0.title.localizedStandardContains(query.search) }
-        let pageSize = GameListQuery.defaultPageSize
-        let items = Array(matching.dropFirst((page - 1) * pageSize).prefix(pageSize))
-        let totalPages = max(1, Int((Double(matching.count) / Double(pageSize)).rounded(.up)))
-        return GamePage(items: items, page: page, pageSize: pageSize, totalItems: matching.count, totalPages: totalPages)
+    func create(id: Game.ID, _ values: SaveGameRequest) async throws -> CreateGameResult {
+        .created(Game(id: id, values: values, createdAt: .now))
     }
 
-    func facets() async throws -> GameFacets {
-        PreviewData.facets
+    func update(id: Game.ID, fields: Set<GameField>, from values: SaveGameRequest) async throws -> Game {
+        Game(id: id, values: values, createdAt: .now)
     }
+
+    func delete(id: Game.ID) async throws {}
 
     func game(id: Game.ID) async throws -> Game {
         guard let game = games.first(where: { $0.id == id }) else {
@@ -27,30 +25,23 @@ struct PreviewGameService: GameService {
         }
         return game
     }
+}
 
-    func create(_ request: SaveGameRequest) async throws -> Game {
-        makeGame(id: UUID().uuidString.lowercased(), from: request)
-    }
-
-    func update(id: Game.ID, with request: SaveGameRequest) async throws -> Game {
-        makeGame(id: id, from: request)
-    }
-
-    func delete(id: Game.ID) async throws {}
-
-    private func makeGame(id: Game.ID, from request: SaveGameRequest) -> Game {
-        Game(
-            id: id, title: request.title, platform: request.platform, status: request.status, format: request.format,
-            region: request.region, edition: request.edition, completeness: request.completeness,
-            condition: request.condition, playStatus: request.playStatus, genre: request.genre,
-            developer: request.developer, publisher: request.publisher, releaseYear: request.releaseYear,
-            barcode: request.barcode, productCode: request.productCode, quantity: request.quantity,
-            purchasePrice: request.purchasePrice, purchaseDate: request.purchaseDate,
-            purchasePlace: request.purchasePlace, estimatedValue: request.estimatedValue,
-            currency: request.currency, storageLocation: request.storageLocation, rating: request.rating,
-            favorite: request.favorite, coverImageUrl: request.coverImageUrl, notes: request.notes,
-            createdAt: .now, updatedAt: .now
+extension SyncEngine {
+    /// An engine signed in as the preview user whose collection syncs `games` from ``PreviewGameAPI``.
+    @MainActor
+    static func preview(games: [Game] = PreviewData.games) -> SyncEngine {
+        guard let store = try? GameStore(url: nil) else {
+            preconditionFailure("SQLite can't open an in-memory database.")
+        }
+        let engine = SyncEngine(
+            repository: GameRepository(store: store, status: SyncStatus()),
+            api: PreviewGameAPI(games: games)
         )
+        Task {
+            await engine.activate(ownerID: PreviewData.user.id)
+        }
+        return engine
     }
 }
 

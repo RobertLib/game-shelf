@@ -2,9 +2,14 @@ import SwiftUI
 
 /// "Profile & settings"
 struct ProfileView: View {
+    let sync: SyncEngine
+
     @Environment(SessionStore.self) private var session
     @Environment(FacetsStore.self) private var facets
     @State private var isConfirmingSignOut = false
+    @State private var syncError: String?
+
+    private var status: SyncStatus { sync.status }
 
     var body: some View {
         List {
@@ -19,11 +24,24 @@ struct ProfileView: View {
                 }
             }
 
-            if let total = facets.facets?.totalItems {
-                Section("Collection") {
-                    LabeledContent("Games", value: Pluralization.games(total))
-                    LabeledContent("Platforms", value: AppFormat.integer(facets.facets?.platforms.count ?? 0))
+            Section("Collection") {
+                LabeledContent("Games", value: Pluralization.games(facets.facets.totalItems))
+                LabeledContent("Platforms", value: AppFormat.integer(facets.facets.platforms.count))
+            }
+
+            Section("Sync") {
+                LabeledContent("Status", value: status.summary)
+                LabeledContent("Last synced") {
+                    TimelineView(.periodic(from: .now, by: 30)) { context in
+                        Text(status.lastSyncedAt.map { AppFormat.relativeTime($0, now: context.date) } ?? "Never")
+                    }
                 }
+                Button {
+                    Task { await syncNow() }
+                } label: {
+                    Label("Sync now", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .disabled(status.isSyncing)
             }
 
             Section("Security") {
@@ -57,11 +75,31 @@ struct ProfileView: View {
             await session.refreshProfile()
         }
         .confirmationDialog("Sign out?", isPresented: $isConfirmingSignOut, titleVisibility: .visible) {
-            Button("Sign out", role: .destructive) {
+            Button(status.pendingCount > 0 ? "Sign out anyway" : "Sign out", role: .destructive) {
                 Task { await session.signOut() }
             }
         } message: {
-            Text("Your collection stays on the server. You can sign in again at any time.")
+            if status.pendingCount > 0 {
+                Text(Pluralization.signOutWarning(unsyncedChanges: status.pendingCount))
+            } else {
+                Text("Your collection stays on the server. You can sign in again at any time.")
+            }
+        }
+        .alert(
+            "Couldn't sync",
+            isPresented: Binding(get: { syncError != nil }, set: { if !$0 { syncError = nil } }),
+            actions: { Button("OK", role: .cancel) {} },
+            message: { Text(syncError ?? "") }
+        )
+    }
+
+    private func syncNow() async {
+        do {
+            try await sync.syncNow()
+        } catch {
+            if !ErrorMessage.isCancellation(error) {
+                syncError = ErrorMessage.message(for: error)
+            }
         }
     }
 }
@@ -98,10 +136,11 @@ private struct ProfileHeader: View {
 
 #if DEBUG
 #Preview {
+    let sync = SyncEngine.preview()
     NavigationStack {
-        ProfileView()
+        ProfileView(sync: sync)
     }
     .environment(PreviewData.sessionStore(signedIn: true))
-    .environment(FacetsStore(service: PreviewGameService(), facets: PreviewData.facets))
+    .environment(FacetsStore(repository: sync.repository))
 }
 #endif

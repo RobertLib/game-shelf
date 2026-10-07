@@ -44,13 +44,3 @@ data class Game(
     val createdAt: Instant,
     val updatedAt: Instant,
 )
-
-/** One page of `GET games` (OpenAPI `GamePage`). */
-@Serializable
-data class GamePage(
-    val items: List<Game>,
-    val page: Int,
-    val pageSize: Int,
-    val totalItems: Int,
-    val totalPages: Int,
-)

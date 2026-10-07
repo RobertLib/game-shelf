@@ -1,6 +1,6 @@
 import { CollectionStatus, GameFormat } from '../generated/prisma/enums.js';
 import type { Prisma } from '../generated/prisma/client.js';
-import type { SaveGameDto } from './dto/save-game.dto.js';
+import type { SaveGameDto, UpdateGameDto } from './dto/save-game.dto.js';
 import {
   type GameSortField,
   type ListGamesQueryDto,
@@ -47,7 +47,7 @@ const toDate = (value: string | undefined) =>
 const nonEmpty = <T>(values: T[] | undefined) =>
   values?.length ? values : undefined;
 
-/** Translates the list query into a Prisma filter scoped to one user. */
+/** Translates the list query into a Prisma filter scoped to one user's existing games. */
 export function buildGameWhere(
   userId: string,
   query: ListGamesQueryDto,
@@ -81,6 +81,7 @@ export function buildGameWhere(
 
   const where: GameWhere = {
     userId,
+    deletedAt: null,
     platform: enumIn(query.platform),
     status: enumIn(query.status),
     format: enumIn(query.format),
@@ -159,5 +160,19 @@ export function toGameData(dto: SaveGameDto) {
     favorite: dto.favorite ?? false,
     coverImageUrl: dto.coverImageUrl ?? null,
     notes: dto.notes ?? null,
-  } satisfies Omit<Prisma.GameUncheckedCreateInput, 'userId'>;
+  } satisfies Omit<Prisma.GameUncheckedCreateInput, 'userId' | 'version'>;
+}
+
+/** Maps a partial update to column values: only the fields present in the body change. */
+export function toGamePatchData(dto: UpdateGameDto) {
+  const present = new Set(
+    Object.entries(dto)
+      .filter(([, value]) => value !== undefined)
+      .map(([key]) => key),
+  );
+  return Object.fromEntries(
+    Object.entries(toGameData(dto as SaveGameDto)).filter(([key]) =>
+      present.has(key),
+    ),
+  ) as Partial<ReturnType<typeof toGameData>>;
 }

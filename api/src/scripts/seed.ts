@@ -658,10 +658,15 @@ try {
       email: DEMO_EMAIL,
       displayName: 'Demo Collector',
       passwordHash: await new PasswordService().hash(DEMO_PASSWORD),
+      gamesVersion: games.length,
     },
   });
   await prisma.game.createMany({
-    data: games.map((game) => ({ ...toGameData(game), userId: user.id })),
+    data: games.map((game, index) => ({
+      ...toGameData(game),
+      userId: user.id,
+      version: index + 1,
+    })),
   });
   console.log(
     `Seeded ${games.length} games for ${DEMO_EMAIL} / ${DEMO_PASSWORD}`,

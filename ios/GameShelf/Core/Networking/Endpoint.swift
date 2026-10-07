@@ -3,7 +3,7 @@ import Foundation
 enum HTTPMethod: String, Sendable {
     case get = "GET"
     case post = "POST"
-    case put = "PUT"
+    case patch = "PATCH"
     case delete = "DELETE"
 }
 
@@ -63,15 +63,14 @@ extension Endpoint where Response == EmptyResponse {
 
 // MARK: - Games
 
-extension Endpoint where Response == GamePage {
-    static func games(_ query: GameListQuery, page: Int, pageSize: Int = GameListQuery.defaultPageSize) -> Self {
-        Endpoint(method: .get, path: "games", queryItems: query.queryItems(page: page, pageSize: pageSize))
-    }
-}
-
-extension Endpoint where Response == GameFacets {
-    static var facets: Self {
-        Endpoint(method: .get, path: "games/facets")
+extension Endpoint where Response == GameChanges {
+    /// One page of the change feed; `cursor` is `nil` for the first call.
+    static func gameChanges(cursor: String?, limit: Int) -> Self {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let cursor {
+            queryItems.insert(URLQueryItem(name: "cursor", value: cursor), at: 0)
+        }
+        return Endpoint(method: .get, path: "games/changes", queryItems: queryItems)
     }
 }
 
@@ -80,12 +79,12 @@ extension Endpoint where Response == Game {
         Endpoint(method: .get, path: "games/\(id.urlPathComponent)")
     }
 
-    static func createGame(_ request: SaveGameRequest) -> Self {
+    static func createGame(_ request: CreateGameRequest) -> Self {
         Endpoint(method: .post, path: "games", body: request)
     }
 
-    static func updateGame(id: Game.ID, _ request: SaveGameRequest) -> Self {
-        Endpoint(method: .put, path: "games/\(id.urlPathComponent)", body: request)
+    static func updateGame(id: Game.ID, _ request: UpdateGameRequest) -> Self {
+        Endpoint(method: .patch, path: "games/\(id.urlPathComponent)", body: request)
     }
 }
 

@@ -2,8 +2,6 @@ import SwiftUI
 
 /// "Add game" / "Edit game", presented as a sheet.
 struct GameFormView: View {
-    let onSaved: @MainActor (Game) -> Void
-
     @State private var model: GameFormViewModel
     @State private var isConfirmingDiscard = false
     @FocusState private var focusedField: GameDraft.Field?
@@ -12,9 +10,8 @@ struct GameFormView: View {
 
     private static let currencySuggestions = ["CZK", "EUR", "USD", "GBP", "JPY", "PLN"]
 
-    init(mode: GameFormMode, service: any GameService, onSaved: @escaping @MainActor (Game) -> Void) {
-        self.onSaved = onSaved
-        _model = State(initialValue: GameFormViewModel(mode: mode, service: service))
+    init(mode: GameFormMode, repository: GameRepository) {
+        _model = State(initialValue: GameFormViewModel(mode: mode, repository: repository))
     }
 
     var body: some View {
@@ -29,9 +26,8 @@ struct GameFormView: View {
             .navigationTitle(model.title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { toolbar }
-            .disabled(model.isSaving)
         }
-        .interactiveDismissDisabled(model.hasChanges || model.isSaving)
+        .interactiveDismissDisabled(model.hasChanges)
         .confirmationDialog("Discard changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
             Button("Discard changes", role: .destructive) { dismiss() }
             Button("Keep editing", role: .cancel) {}
@@ -63,7 +59,7 @@ struct GameFormView: View {
             NavigationLink {
                 PlatformPickerView(
                     selection: $model.draft.platform,
-                    collectionPlatforms: facets.facets?.platformCounts.map(\.platform) ?? []
+                    collectionPlatforms: facets.facets.platformCounts.map(\.platform)
                 )
             } label: {
                 ValidatedRow(error: errors[.platform]) {
@@ -223,21 +219,16 @@ struct GameFormView: View {
             }
         }
         ToolbarItem(placement: .confirmationAction) {
-            if model.isSaving {
-                ProgressView()
-                    .accessibilityLabel("Saving")
-            } else {
-                Button("Save") {
-                    focusedField = nil
-                    Task {
-                        if let game = await model.save() {
-                            onSaved(game)
-                            dismiss()
-                        }
+            Button("Save") {
+                focusedField = nil
+                Task {
+                    if await model.save() {
+                        dismiss()
                     }
                 }
-                .fontWeight(.semibold)
             }
+            .fontWeight(.semibold)
+            .disabled(model.isSaving)
         }
         ToolbarItemGroup(placement: .keyboard) {
             Spacer()
@@ -278,12 +269,14 @@ private struct ValidatedRow<Content: View>: View {
 
 #if DEBUG
 #Preview("Add game") {
-    GameFormView(mode: .create, service: PreviewGameService()) { _ in }
-        .environment(FacetsStore(service: PreviewGameService(), facets: PreviewData.facets))
+    let sync = SyncEngine.preview()
+    GameFormView(mode: .create, repository: sync.repository)
+        .environment(FacetsStore(repository: sync.repository))
 }
 
 #Preview("Edit game") {
-    GameFormView(mode: .edit(PreviewData.games[0]), service: PreviewGameService()) { _ in }
-        .environment(FacetsStore(service: PreviewGameService(), facets: PreviewData.facets))
+    let sync = SyncEngine.preview()
+    GameFormView(mode: .edit(PreviewData.games[0]), repository: sync.repository)
+        .environment(FacetsStore(repository: sync.repository))
 }
 #endif

@@ -4,6 +4,10 @@ Both native apps (Android in `android/`, iOS in `ios/`) implement the same produ
 against the REST API described in `openapi/openapi.yaml`. Keep them functionally
 identical; follow each platform's own UI conventions (Material 3 / Human Interface Guidelines).
 
+Both apps are **offline-first**: the collection is stored on the device, every screen reads it from
+there and every change is saved locally first, then synced with the API when the server can be
+reached. The sync protocol and the rules both apps follow are in [offline-sync.md](offline-sync.md).
+
 UI language: **English** (the only localization). App name: **Game Shelf**.
 Numbers, prices and dates are formatted with the **device locale** (prices always in the game's
 `currency`). Pluralization follows the platform's plural rules ("1 game", "2 games").
@@ -21,16 +25,25 @@ Numbers, prices and dates are formatted with the **device locale** (prices alway
 - `POST auth/change-password` returns a new `AuthResponse` – store it (all other sessions are revoked).
 - `POST auth/logout { refreshToken }` on sign-out (ignore failures), then clear the local session.
 - `DELETE auth/me { password }` deletes the account (required by App Store guideline 5.1.1(v)).
-- `GET games` – query params (all optional): `q`, multi-value `platform`, `status`, `format`, `region`,
-  `completeness`, `condition`, `playStatus`, `genre` (send repeated params, e.g. `platform=PS2&platform=PS5`),
-  `publisher`, `developer`, `storageLocation` (contains), `favorite`, `hasCover` (true/false),
-  `releaseYearFrom/To`, `purchaseDateFrom/To` (YYYY-MM-DD), `purchasePriceMin/Max`, `estimatedValueMin/Max`,
-  `ratingMin/Max`, `sort` (GameSortField), `order` (asc|desc), `page` (1-based), `pageSize` (≤100, use 25).
-  Response `GamePage { items, page, pageSize, totalItems, totalPages }`.
-- `GET games/facets` → distinct values with counts (platforms, statuses, genres, publishers, developers,
-  storageLocations, releaseYearMin/Max, totalItems). Use for filter options and form autocomplete.
-- `POST games` / `PUT games/{id}` take `SaveGameRequest`. PUT is a full replacement – always send every field
-  (nulls for empty optional ones). `DELETE games/{id}` → 204.
+- The list, its filters and the facets are computed **on the device** from the synced collection,
+  with the same semantics as `GET games` and `GET games/facets` (the apps do not call those endpoints):
+  - search `q`: every whitespace-separated word must be contained (case-insensitive) in the title,
+    edition, developer, publisher, genre, product code, barcode or notes;
+  - multi-value filters (platform, status, format, region, completeness, condition, play status, genre)
+    match any of the selected values; genre compares case-insensitively; publisher, developer and
+    storage location are case-insensitive "contains"; favorites only; with / without cover;
+    inclusive ranges of release year, purchase date, purchase price, estimated value and minimum rating
+    (games without a value never match a range);
+  - sort by `GameSortField` ascending or descending, games without a value in the sorted field always
+    last, then by title and id; `platform` sorts in the order of the Platform enum (manufacturer and
+    generation), titles compare locale-aware and case-insensitive;
+  - facets: distinct values with counts (platforms, statuses, genres, publishers, developers,
+    storageLocations, releaseYearMin/Max, totalItems), sorted by count descending, then by value;
+    text values that differ only in letter case are one facet labelled with the most common spelling.
+- Sync (details in [offline-sync.md](offline-sync.md)): `GET games/changes?cursor=…` (change feed),
+  `POST games` with a client-generated `id` (`CreateGameRequest`), `PATCH games/{id}` with only the
+  changed fields (`UpdateGameRequest`), `DELETE games/{id}` (idempotent), `GET games/{id}`.
+  `PUT games/{id}` (full replacement) still exists for older app versions.
 
 ## Error messages (by `code`)
 
@@ -43,6 +56,7 @@ Numbers, prices and dates are formatted with the **device locale** (prices alway
 | TOO_MANY_REQUESTS | Too many attempts. Please try again in a moment. |
 | GAME_NOT_FOUND | Game not found. |
 | network failure / timeout | Can't connect to the server. Check your connection. |
+| a synced change was rejected (see offline-sync.md) | Some changes were rejected by the server and have been undone. |
 | anything else | Something went wrong. Please try again. |
 
 Validate on the client before sending (same rules as the API): email format, password 8–128 chars,
@@ -55,17 +69,28 @@ currency 3 letters (default CZK).
 1. **Sign in** – email, password (show/hide), "Sign in", link "Don't have an account? Create one".
 2. **Create account** – email, display name (optional), password, confirm password, "Create account".
 3. **My collection** (main list)
-   - Header shows the result count ("132 games", "1 game").
-   - Search field (debounce ~350 ms) → `q`.
+   - Header shows the result count ("132 games", "1 game") and, at its end, the sync status:
+     a small progress indicator while syncing (accessibility label "Syncing…"), "Offline" with a
+     cloud-off icon when the server can't be reached, otherwise "3 unsynced changes" while changes
+     wait to be pushed; nothing when everything is synced.
+   - Search field (debounce ~350 ms).
    - Sort menu (field + ascending/descending). Filter button with a badge = number of active filters.
    - Active filters as removable chips under the search field + "Clear all".
    - Rows: cover thumbnail (`coverImageUrl`) or a placeholder with the platform short name; title; secondary line
      "Platform · Region · Year"; badges for status (only when not OWNED), completeness and condition;
      star when favorite; estimated value if present.
-   - Infinite scroll (pageSize 25), pull-to-refresh, loading/error/empty states:
-     empty collection → CTA "Add your first game"; no results → "No games match your filters" + reset button.
+   - The whole result is one list (no paging); it updates by itself when a sync brings changes.
+   - Pull-to-refresh runs a sync; when it fails, show the error message (e.g. "Can't connect to the
+     server. Check your connection.") and keep the list.
+   - States: before the first sync has completed and with nothing stored → loading ("Loading
+     collection…"); the first sync failed and nothing is stored → "Couldn't load your collection" +
+     the error message + "Try again"; empty collection → CTA "Add your first game"; no results →
+     "No games match your filters" + reset button.
    - FAB / toolbar "+" (Add game) → new game form. Tap a row → detail.
    - Toolbar entry to the profile/settings screen.
+   - After a change is saved: "Game saved." / after a delete: "Game deleted." (Android snackbar;
+     iOS shows the change in the list). When the sync engine undoes rejected changes, show
+     "Some changes were rejected by the server and have been undone."
 4. **Filters** (bottom sheet / sheet, opened from the list) – edits a draft, "Apply" applies, "Reset" clears:
    - Platforms (multi-select, grouped by manufacturer; show counts from facets; platforms present in the
      collection first or highlighted), Status, Format, Region, Completeness, Condition, Play status (multi-select chips),
@@ -74,8 +99,10 @@ currency 3 letters (default CZK).
    - Release year from–to, Purchase price from–to, Estimated value from–to, Purchase date from–to, Minimum rating.
    - Filters + sort survive navigation to detail and back (keep them in the list view model).
 5. **Game detail** – cover image (large, if any), title, all non-empty fields grouped in sections
-   (Basics / Collector details / Purchase & value / Other), favorite toggle (PUT with the full object),
-   "Edit", "Delete" (confirmation dialog). Prices formatted with the game's currency.
+   (Basics / Collector details / Purchase & value / Other), favorite toggle (instant, saved locally),
+   "Edit", "Delete" (confirmation dialog; the game disappears at once). Prices formatted with the game's
+   currency. The screen follows the stored game, so a sync updates it; if the game is deleted on another
+   device, show "Game not found."
 6. **Add game / Edit game** – sections:
    - Basics: Title*, Platform* (picker grouped by manufacturer, searchable), Edition, Genre,
      Developer, Publisher, Release year, Cover image URL.
@@ -85,10 +112,24 @@ currency 3 letters (default CZK).
      clearable), Purchased from.
    - Rating & play: Play status, Rating 1–10 (clearable), Favorite, Notes (multiline).
    - Text fields offer suggestions from facets (genre, publisher, developer, storage location).
-   - Inline validation messages, save button disabled while saving, ask before discarding
-     unsaved changes ("Discard changes?"). After save, go back and refresh the list / detail.
-7. **Profile & settings** – email, display name, "Change password" (current, new, confirm → success message),
-   "Sign out", "Delete account" (destructive, explains that the whole collection is deleted, asks for the password).
+   - Inline validation messages, ask before discarding unsaved changes ("Discard changes?").
+     Saving is local and works offline; after save, go back – the list and detail update by themselves.
+7. **Profile & settings** – email, display name; "Collection" (number of games and platforms, from the
+   local data); "Sync":
+   - Status: "Syncing…" / "Offline" / "3 unsynced changes" / "All changes synced" / "Not synced yet"
+     (nothing synced and nothing waiting),
+   - Last synced: relative time ("5 minutes ago") or "Never",
+   - "Sync now" (disabled while syncing; a failure shows the error message);
+
+   "Change password" (current, new, confirm → success message), "Sign out", "Delete account"
+   (destructive, explains that the whole collection is deleted, asks for the password).
+   - Sign out asks for confirmation. With unsynced changes the dialog warns: "1 change hasn't been
+     synced yet. It will be lost if you sign out now." / "3 changes haven't been synced yet. They will
+     be lost if you sign out now." with the destructive button "Sign out anyway"; otherwise "Your
+     collection stays on the server. You can sign in again at any time." with "Sign out".
+   - Signing out and deleting the account remove the collection from the device. When the session
+     expires on its own, the local data and unsynced changes are kept for the next sign-in of the same
+     user.
 
 ## Labels
 

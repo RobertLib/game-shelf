@@ -28,22 +28,7 @@ enum PreviewData {
         game("Doom", .pc, status: .forSale, completeness: .boxOnly, condition: .poor, releaseYear: 1993),
     ]
 
-    static let facets = GameFacets(
-        totalItems: games.count,
-        platforms: [
-            FacetValue(value: "SNES", count: 2), FacetValue(value: "N64", count: 1),
-            FacetValue(value: "PS1", count: 1), FacetValue(value: "PS5", count: 1), FacetValue(value: "PC", count: 1),
-        ],
-        statuses: [
-            FacetValue(value: "OWNED", count: 4), FacetValue(value: "WISHLIST", count: 1), FacetValue(value: "FOR_SALE", count: 1),
-        ],
-        genres: [FacetValue(value: "RPG", count: 3), FacetValue(value: "Action-adventure", count: 1)],
-        publishers: [FacetValue(value: "Nintendo", count: 1), FacetValue(value: "Square", count: 1), FacetValue(value: "Sony", count: 1)],
-        developers: [FacetValue(value: "Nintendo EAD", count: 1), FacetValue(value: "Square", count: 1)],
-        storageLocations: [FacetValue(value: "Shelf A, row 3", count: 1)],
-        releaseYearMin: 1990,
-        releaseYearMax: 2022
-    )
+    static let facets = GameFacets(games: games)
 
     @MainActor
     static func sessionStore(signedIn: Bool) -> SessionStore {

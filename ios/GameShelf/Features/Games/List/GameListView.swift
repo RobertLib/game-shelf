@@ -1,28 +1,20 @@
 import SwiftUI
 
-/// "My collection" – searchable, filterable, infinitely scrolling list of games.
+/// "My collection" – the searchable, filterable list of the local collection.
 struct GameListView: View {
     @Bindable var model: GameListViewModel
-    let games: any GameService
-
-    @Environment(FacetsStore.self) private var facets
 
     var body: some View {
         List {
             if !model.games.isEmpty {
                 Section {
                     ForEach(model.games) { game in
-                        NavigationLink(value: MainRoute.game(game)) {
+                        NavigationLink(value: MainRoute.game(game.id)) {
                             GameRowView(game: game)
                         }
-                        .onAppear { model.loadMoreIfNeeded(after: game) }
-                    }
-                    if model.hasMorePages || model.nextPageError != nil {
-                        NextPageRow(error: model.nextPageError) { model.retryNextPage() }
-                            .onAppear { model.loadNextPage() }
                     }
                 } header: {
-                    ResultCountHeader(count: model.totalItems, isReloading: model.isReloading)
+                    ResultCountHeader(count: model.games.count, status: model.syncStatus)
                 }
             }
         }
@@ -41,13 +33,11 @@ struct GameListView: View {
             }
             model.commitSearch()
         }
-        .task(id: model.query) {
-            await model.loadIfNeeded()
+        .task(id: model.resultsKey) {
+            await model.updateResults()
         }
         .refreshable {
-            async let facetsReload: Void = facets.reload()
-            await model.reload()
-            await facetsReload
+            await model.refresh()
         }
         .toolbar { toolbar }
         .sheet(item: $model.presentedSheet) { sheet in
@@ -55,10 +45,7 @@ struct GameListView: View {
             case .filters:
                 FiltersView(filter: model.query.filter, onApply: model.applyFilter)
             case .newGame:
-                GameFormView(mode: .create, service: games) { game in
-                    model.apply(.created(game))
-                    Task { await facets.reload() }
-                }
+                GameFormView(mode: .create, repository: model.repository)
             }
         }
         .alert(
@@ -92,7 +79,7 @@ struct GameListView: View {
     @ViewBuilder
     private var stateOverlay: some View {
         switch model.phase {
-        case .idle, .loading:
+        case .loading:
             ProgressView("Loading collection…")
         case .failed(let message):
             ContentUnavailableView {
@@ -101,7 +88,7 @@ struct GameListView: View {
                 Text(message)
             } actions: {
                 Button("Try again") {
-                    Task { await model.reload() }
+                    Task { await model.retry() }
                 }
                 .buttonStyle(.borderedProminent)
             }
@@ -133,50 +120,34 @@ struct GameListView: View {
 
 // MARK: - Pieces
 
+/// "132 games" and, at its end, the sync status.
 private struct ResultCountHeader: View {
     let count: Int
-    let isReloading: Bool
+    let status: SyncStatus
 
     var body: some View {
         HStack(spacing: 8) {
             Text(Pluralization.games(count))
                 .contentTransition(.numericText())
-            if isReloading {
+            Spacer(minLength: 8)
+            switch status.indicator {
+            case .syncing:
                 ProgressView()
                     .controlSize(.mini)
+                    .accessibilityLabel("Syncing…")
+            case .offline:
+                Label("Offline", systemImage: "icloud.slash")
+                    .labelStyle(.titleAndIcon)
+                    .imageScale(.small)
+            case .unsynced(let count):
+                Text(Pluralization.unsyncedChanges(count))
+            case nil:
+                EmptyView()
             }
         }
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(.secondary)
         .textCase(nil)
-        .accessibilityElement(children: .combine)
-    }
-}
-
-private struct NextPageRow: View {
-    let error: String?
-    let onRetry: () -> Void
-
-    var body: some View {
-        HStack {
-            Spacer()
-            if let error {
-                VStack(spacing: 8) {
-                    Text(error)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                    Button("Try again", action: onRetry)
-                        .buttonStyle(.bordered)
-                }
-            } else {
-                ProgressView()
-                    .accessibilityLabel("Loading more games")
-            }
-            Spacer()
-        }
-        .padding(.vertical, 8)
-        .listRowSeparator(.hidden)
     }
 }
 
@@ -274,18 +245,18 @@ private struct FilterButton: View {
 
 #if DEBUG
 #Preview("Collection") {
-    let service = PreviewGameService()
+    let sync = SyncEngine.preview()
     NavigationStack {
-        GameListView(model: GameListViewModel(service: service), games: service)
+        GameListView(model: GameListViewModel(sync: sync))
     }
-    .environment(FacetsStore(service: service, facets: PreviewData.facets))
+    .environment(FacetsStore(repository: sync.repository))
 }
 
 #Preview("Empty collection") {
-    let service = PreviewGameService(games: [])
+    let sync = SyncEngine.preview(games: [])
     NavigationStack {
-        GameListView(model: GameListViewModel(service: service), games: service)
+        GameListView(model: GameListViewModel(sync: sync))
     }
-    .environment(FacetsStore(service: service, facets: .empty))
+    .environment(FacetsStore(repository: sync.repository))
 }
 #endif

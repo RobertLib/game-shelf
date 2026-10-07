@@ -8,6 +8,9 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import cz.gameshelf.app.R
 import cz.gameshelf.app.data.auth.AuthRepository
 import cz.gameshelf.app.data.auth.SessionState
+import cz.gameshelf.app.data.games.GamesRepository
+import cz.gameshelf.app.data.sync.SyncController
+import cz.gameshelf.app.data.sync.SyncStatus
 import cz.gameshelf.app.domain.model.ApiResult
 import cz.gameshelf.app.domain.model.User
 import cz.gameshelf.app.ui.auth.AuthValidation
@@ -15,21 +18,37 @@ import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.appContainer
 import cz.gameshelf.app.ui.common.toDeleteAccountUiText
 import cz.gameshelf.app.ui.common.toUiText
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class ProfileUiState(
     val user: User? = null,
+    /** Size of the stored collection; `null` until it has been read. */
+    val collection: CollectionSummary? = null,
+    val sync: SyncStatus = SyncStatus(),
+    /** Why the last "Sync now" failed; cleared by the next attempt or a later successful sync. */
+    val syncError: UiText? = null,
+    val showLogoutConfirmation: Boolean = false,
     /** Non-null while the change-password dialog is open. */
     val changePassword: ChangePasswordForm? = null,
     /** Non-null while the delete-account dialog is open. */
     val deleteAccount: DeleteAccountForm? = null,
+)
+
+data class CollectionSummary(
+    val games: Int,
+    val platforms: Int,
 )
 
 data class ChangePasswordForm(
@@ -55,7 +74,12 @@ sealed interface ProfileEvent {
 }
 
 /** Signing out or deleting the account ends the session; the app root then shows the login. */
-class ProfileViewModel(private val authRepository: AuthRepository) : ViewModel() {
+class ProfileViewModel(
+    private val authRepository: AuthRepository,
+    gamesRepository: GamesRepository,
+    private val sync: SyncController,
+    computeDispatcher: CoroutineDispatcher = Dispatchers.Default,
+) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ProfileUiState())
     val uiState: StateFlow<ProfileUiState> = _uiState.asStateFlow()
@@ -71,6 +95,31 @@ class ProfileViewModel(private val authRepository: AuthRepository) : ViewModel()
         }
         // Best effort refresh of the cached profile; the stored copy is shown meanwhile.
         viewModelScope.launch { authRepository.refreshCurrentUser() }
+        viewModelScope.launch {
+            gamesRepository.games
+                .map { games -> CollectionSummary(games.size, games.distinctBy { it.platform }.size) }
+                .distinctUntilChanged()
+                .flowOn(computeDispatcher)
+                .collect { summary -> _uiState.update { it.copy(collection = summary) } }
+        }
+        viewModelScope.launch {
+            sync.status.collect { status ->
+                _uiState.update { state ->
+                    // A sync completed since the failure, so its message is out of date.
+                    val syncedSince = status.lastSyncedAt != state.sync.lastSyncedAt
+                    state.copy(sync = status, syncError = state.syncError.takeUnless { syncedSince })
+                }
+            }
+        }
+    }
+
+    fun syncNow() {
+        if (_uiState.value.sync.isSyncing) return
+        _uiState.update { it.copy(syncError = null) }
+        viewModelScope.launch {
+            val result = sync.syncNow()
+            if (result is ApiResult.Failure) _uiState.update { it.copy(syncError = result.error.toUiText()) }
+        }
     }
 
     fun openChangePassword() = _uiState.update { it.copy(changePassword = ChangePasswordForm()) }
@@ -155,13 +204,21 @@ class ProfileViewModel(private val authRepository: AuthRepository) : ViewModel()
         }
     }
 
+    /** Asks first; the dialog warns about unsynced changes, which signing out deletes. */
+    fun requestLogout() = _uiState.update { it.copy(showLogoutConfirmation = true) }
+
+    fun dismissLogout() = _uiState.update { it.copy(showLogoutConfirmation = false) }
+
     fun logout() {
+        _uiState.update { it.copy(showLogoutConfirmation = false) }
         viewModelScope.launch { authRepository.logout() }
     }
 
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
-            initializer { ProfileViewModel(appContainer.authRepository) }
+            initializer {
+                ProfileViewModel(appContainer.authRepository, appContainer.gamesRepository, appContainer.syncController)
+            }
         }
     }
 }

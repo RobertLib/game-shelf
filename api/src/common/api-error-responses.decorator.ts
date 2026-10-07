@@ -7,6 +7,8 @@ const descriptions: Partial<Record<HttpStatus, string>> = {
   [HttpStatus.UNAUTHORIZED]: 'Missing, invalid or expired credentials',
   [HttpStatus.NOT_FOUND]: 'Resource not found',
   [HttpStatus.CONFLICT]: 'Conflict with existing data',
+  [HttpStatus.GONE]:
+    'The sync cursor can no longer be continued; start again without it',
   [HttpStatus.TOO_MANY_REQUESTS]: 'Rate limit exceeded',
 };
 

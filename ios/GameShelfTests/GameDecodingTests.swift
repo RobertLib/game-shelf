@@ -81,27 +81,18 @@ struct GameDecodingTests {
         #expect(!CollectionStatus.allCases.contains(.unknown))
     }
 
-    @Test func decodesGamePage() throws {
-        let json = """
-        { "items": [\(Fixtures.gameJSON)], "page": 1, "pageSize": 25, "totalItems": 132, "totalPages": 6 }
-        """
-        let page = try decoder.decode(GamePage.self, from: Data(json.utf8))
-        #expect(page.items.count == 1)
-        #expect(page.items.first?.title == "The Legend of Zelda: Ocarina of Time")
-        #expect(page.totalItems == 132)
-        #expect(page.totalPages == 6)
+    @Test func decodesChangesFeedPage() throws {
+        let page = try decoder.decode(GameChanges.self, from: Fixtures.changesJSON)
+        #expect(page.games.map(\.title) == ["The Legend of Zelda: Ocarina of Time"])
+        #expect(page.deletedIds == ["01a1163b-0cb1-75e9-bd4e-4a7feec69238"])
+        #expect(page.cursor == "1234")
+        #expect(!page.hasMore)
     }
 
-    @Test func decodesFacetsAndIgnoresUnknownPlatforms() throws {
-        var json = String(decoding: Fixtures.facetsJSON, as: UTF8.self)
-        json = json.replacingOccurrences(of: "{ \"value\": \"N64\", \"count\": 1 }", with: "{ \"value\": \"PLAYDATE\", \"count\": 1 }")
-        let facets = try decoder.decode(GameFacets.self, from: Data(json.utf8))
-        #expect(facets.totalItems == 3)
-        #expect(facets.releaseYearMin == 1998)
-        #expect(facets.releaseYearMax == nil)
-        #expect(facets.platformCounts.map(\.platform) == [.ps2])
-        #expect(facets.count(of: .ps2) == 2)
-        #expect(facets.count(of: .owned) == 3)
+    @Test func storedGamesRoundTripThroughTheAPICoders() throws {
+        let game = try decodeGame(Fixtures.gameJSON)
+        let stored = try decoder.decode(Game.self, from: JSONEncoder.api().encode(game))
+        #expect(stored == game)
     }
 
     @Test func decodesAuthResponseWithNullDisplayName() throws {

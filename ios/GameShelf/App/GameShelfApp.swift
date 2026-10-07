@@ -27,6 +27,6 @@ private struct AppRoot: View {
     @State private var container = AppContainer.live()
 
     var body: some View {
-        RootView(session: container.session, games: container.games)
+        RootView(session: container.session, sync: container.sync)
     }
 }

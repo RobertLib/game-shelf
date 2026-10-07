@@ -16,17 +16,27 @@ import cz.gameshelf.app.data.auth.AuthRepository
 import cz.gameshelf.app.data.auth.EncryptedSessionStore
 import cz.gameshelf.app.data.auth.KeystorePayloadCipher
 import cz.gameshelf.app.data.auth.SessionManager
+import cz.gameshelf.app.data.auth.SessionState
 import cz.gameshelf.app.data.games.GamesRepository
-import cz.gameshelf.app.data.games.NetworkGamesRepository
+import cz.gameshelf.app.data.games.OfflineGamesRepository
+import cz.gameshelf.app.data.local.GameShelfDatabase
+import cz.gameshelf.app.data.local.LocalGameStore
+import cz.gameshelf.app.data.sync.ForegroundMonitor
+import cz.gameshelf.app.data.sync.NetworkMonitor
+import cz.gameshelf.app.data.sync.SyncController
+import cz.gameshelf.app.data.sync.SyncEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import okhttp3.OkHttpClient
 import retrofit2.create
 
 private val Context.sessionDataStore by preferencesDataStore(name = "session")
 
-/** Manual dependency graph, created once by the Application. */
+/** Manual dependency graph, created once by the Application (on the main thread). */
 class AppContainer(context: Context) {
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -58,12 +68,37 @@ class AppContainer(context: Context) {
 
     private val authenticatedRetrofit = HttpClients.retrofit(BuildConfig.API_BASE_URL, authenticatedApiClient)
 
+    private val localGameStore = LocalGameStore(GameShelfDatabase.create(context))
+
+    private val syncEngine = SyncEngine(
+        api = authenticatedRetrofit.create<GamesApi>(),
+        store = localGameStore,
+        signedInUserId = sessionManager.state
+            .map { (it as? SessionState.SignedIn)?.user?.id }
+            .stateIn(appScope, SharingStarted.Eagerly, null),
+        isConnected = NetworkMonitor(context).isConnected,
+        isForeground = ForegroundMonitor().isForeground,
+        scope = appScope,
+    )
+
+    val syncController: SyncController = syncEngine
+
     val authRepository = AuthRepository(
         authApi = authApi,
         accountApi = authenticatedRetrofit.create<AccountApi>(),
         sessionManager = sessionManager,
         appScope = appScope,
+        prepareUserData = syncEngine::prepareUserData,
+        clearUserData = syncEngine::clearUserData,
     )
 
-    val gamesRepository: GamesRepository = NetworkGamesRepository(authenticatedRetrofit.create<GamesApi>())
+    val gamesRepository: GamesRepository = OfflineGamesRepository(
+        store = localGameStore,
+        requestSync = syncEngine::requestSync,
+        scope = appScope,
+    )
+
+    init {
+        syncEngine.start()
+    }
 }

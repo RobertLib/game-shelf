@@ -488,6 +488,9 @@ paths:
       tags:
         - games
     post:
+      description: "With a client-generated `id` the call is idempotent: if the game
+        already exists, it is returned unchanged with 200, or 404 when it has
+        been deleted meanwhile."
       operationId: createGame
       parameters: []
       requestBody:
@@ -495,10 +498,16 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/SaveGameRequest"
+              $ref: "#/components/schemas/CreateGameRequest"
       responses:
+        "200":
+          description: Already existed, unchanged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Game"
         "201":
-          description: ""
+          description: Created
           content:
             application/json:
               schema:
@@ -511,6 +520,18 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
           description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Conflict with existing data
           content:
             application/json:
               schema:
@@ -540,6 +561,61 @@ paths:
       security:
         - bearer: []
       summary: Distinct values in the collection for building filters
+      tags:
+        - games
+  /api/v1/games/changes:
+    get:
+      description: "Games created, changed or deleted after `cursor`, oldest change
+        first. Start without a cursor, then keep calling with the returned
+        `cursor` while `hasMore` is true. 410 SYNC_RESET_REQUIRED means the
+        cursor cannot be continued: drop the synced data and start again without
+        a cursor."
+      operationId: listGameChanges
+      parameters:
+        - name: cursor
+          required: false
+          in: query
+          description: "`cursor` from the previous response. Omit it to get every game
+            from the beginning."
+          schema:
+            example: "42"
+            type: string
+        - name: limit
+          required: false
+          in: query
+          schema:
+            minimum: 1
+            maximum: 1000
+            default: 500
+            type: integer
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GameChanges"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: The sync cursor can no longer be continued; start again without it
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Change feed for offline clients
       tags:
         - games
   /api/v1/games/{id}:
@@ -629,7 +705,55 @@ paths:
       summary: Replace a game
       tags:
         - games
+    patch:
+      description: Only the fields present in the body change; `null` clears an
+        optional field.
+      operationId: patchGame
+      parameters:
+        - name: id
+          required: true
+          in: path
+          schema:
+            format: uuid
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateGameRequest"
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Game"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Resource not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Change some fields of a game
+      tags:
+        - games
     delete:
+      description: Deleting a game that is already deleted also succeeds.
       operationId: deleteGame
       parameters:
         - name: id
@@ -763,6 +887,7 @@ components:
         - INVALID_CURRENT_PASSWORD
         - EMAIL_ALREADY_REGISTERED
         - GAME_NOT_FOUND
+        - SYNC_RESET_REQUIRED
         - NOT_FOUND
         - TOO_MANY_REQUESTS
         - BAD_REQUEST
@@ -1161,6 +1286,169 @@ components:
         - storageLocations
         - releaseYearMin
         - releaseYearMax
+    GameChanges:
+      type: object
+      properties:
+        games:
+          description: Games created or changed after the cursor.
+          type: array
+          items:
+            $ref: "#/components/schemas/Game"
+        deletedIds:
+          description: Ids of games deleted after the cursor.
+          type: array
+          items:
+            type: string
+            format: uuid
+        cursor:
+          type: string
+          description: Opaque position in the feed. Send it with the next call; store it
+            together with the data of this page.
+          example: "42"
+        hasMore:
+          type: boolean
+          description: More changes are waiting; call again right away with the new cursor.
+      required:
+        - games
+        - deletedIds
+        - cursor
+        - hasMore
+    CreateGameRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          example: "The Legend of Zelda: Ocarina of Time"
+        platform:
+          example: N64
+          allOf:
+            - $ref: "#/components/schemas/Platform"
+        status:
+          default: OWNED
+          allOf:
+            - $ref: "#/components/schemas/CollectionStatus"
+        format:
+          default: PHYSICAL
+          allOf:
+            - $ref: "#/components/schemas/GameFormat"
+        region:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Region"
+        edition:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Collector's Edition
+        completeness:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Completeness"
+        condition:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Condition"
+        playStatus:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PlayStatus"
+        genre:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Action-adventure
+        developer:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Nintendo EAD
+        publisher:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Nintendo
+        releaseYear:
+          type: integer
+          nullable: true
+          minimum: 1950
+          maximum: 2100
+          example: 1998
+        barcode:
+          type: string
+          nullable: true
+          pattern: ^[0-9]{8,14}$
+          description: EAN / UPC (8–14 digits).
+          example: "045496870058"
+        productCode:
+          type: string
+          nullable: true
+          maxLength: 50
+          description: Catalogue / serial number from the media or spine.
+          example: NUS-NZLP-EUR
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 999
+          default: 1
+        purchasePrice:
+          type: number
+          nullable: true
+          minimum: 0
+          example: 1299.9
+        purchaseDate:
+          type: string
+          format: date
+          nullable: true
+          example: 2024-05-17
+        purchasePlace:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Flea market
+        estimatedValue:
+          type: number
+          nullable: true
+          minimum: 0
+          example: 2500
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          default: CZK
+          description: ISO 4217 currency of purchasePrice and estimatedValue.
+          example: CZK
+        storageLocation:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Shelf A, row 3
+        rating:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 10
+          example: 9
+        favorite:
+          type: boolean
+          default: false
+        coverImageUrl:
+          type: string
+          format: uri
+          nullable: true
+          maxLength: 2048
+        notes:
+          type: string
+          nullable: true
+          maxLength: 5000
+        id:
+          type: string
+          format: uuid
+          description: Client-generated id. When a game with this id already exists, it is
+            returned unchanged (200).
+      required:
+        - title
+        - platform
     SaveGameRequest:
       type: object
       properties:
@@ -1292,3 +1580,126 @@ components:
       required:
         - title
         - platform
+    UpdateGameRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          maxLength: 200
+          example: "The Legend of Zelda: Ocarina of Time"
+        platform:
+          example: N64
+          allOf:
+            - $ref: "#/components/schemas/Platform"
+        status:
+          allOf:
+            - $ref: "#/components/schemas/CollectionStatus"
+        format:
+          allOf:
+            - $ref: "#/components/schemas/GameFormat"
+        region:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Region"
+        edition:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Collector's Edition
+        completeness:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Completeness"
+        condition:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/Condition"
+        playStatus:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/PlayStatus"
+        genre:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Action-adventure
+        developer:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Nintendo EAD
+        publisher:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Nintendo
+        releaseYear:
+          type: integer
+          nullable: true
+          minimum: 1950
+          maximum: 2100
+          example: 1998
+        barcode:
+          type: string
+          nullable: true
+          pattern: ^[0-9]{8,14}$
+          description: EAN / UPC (8–14 digits).
+          example: "045496870058"
+        productCode:
+          type: string
+          nullable: true
+          maxLength: 50
+          description: Catalogue / serial number from the media or spine.
+          example: NUS-NZLP-EUR
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 999
+        purchasePrice:
+          type: number
+          nullable: true
+          minimum: 0
+          example: 1299.9
+        purchaseDate:
+          type: string
+          format: date
+          nullable: true
+          example: 2024-05-17
+        purchasePlace:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Flea market
+        estimatedValue:
+          type: number
+          nullable: true
+          minimum: 0
+          example: 2500
+        currency:
+          type: string
+          minLength: 3
+          maxLength: 3
+          description: ISO 4217 currency of purchasePrice and estimatedValue.
+          example: CZK
+        storageLocation:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Shelf A, row 3
+        rating:
+          type: integer
+          nullable: true
+          minimum: 1
+          maximum: 10
+          example: 9
+        favorite:
+          type: boolean
+        coverImageUrl:
+          type: string
+          format: uri
+          nullable: true
+          maxLength: 2048
+        notes:
+          type: string
+          nullable: true
+          maxLength: 5000

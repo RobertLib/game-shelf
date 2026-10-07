@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.calculateEndPadding
 import androidx.compose.foundation.layout.calculateStartPadding
@@ -21,14 +22,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -37,12 +35,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalResources
@@ -71,12 +67,7 @@ import cz.gameshelf.app.ui.components.ErrorContent
 import cz.gameshelf.app.ui.components.LoadingContent
 import cz.gameshelf.app.ui.games.filter.FilterSheet
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
-
-/** Start loading the next page when this many rows remain below the last visible one. */
-private const val LOAD_MORE_THRESHOLD = 5
 
 @Composable
 fun GameListRoute(
@@ -113,8 +104,6 @@ fun GameListRoute(
         onClearSearchAndFilters = viewModel::clearSearchAndFilters,
         onRefresh = viewModel::refresh,
         onRetry = viewModel::retry,
-        onLoadMore = viewModel::loadNextPage,
-        onRetryLoadMore = viewModel::retryLoadMore,
         onGameClick = onGameClick,
         onAddGame = onAddGame,
         onOpenProfile = onOpenProfile,
@@ -147,8 +136,6 @@ fun GameListScreen(
     onClearSearchAndFilters: () -> Unit,
     onRefresh: () -> Unit,
     onRetry: () -> Unit,
-    onLoadMore: () -> Unit,
-    onRetryLoadMore: () -> Unit,
     onGameClick: (String) -> Unit,
     onAddGame: () -> Unit,
     onOpenProfile: () -> Unit,
@@ -216,10 +203,15 @@ fun GameListScreen(
                     .fillMaxWidth(),
             ) {
                 val bottomPadding = padding.calculateBottomPadding()
+                val loadError = state.loadError
                 when {
-                    state.isLoading && state.games.isEmpty() -> LoadingContent()
-                    state.loadError != null -> ScrollableFill {
-                        ErrorContent(message = state.loadError.asString(), onRetry = onRetry)
+                    state.isLoading -> LoadingContent(message = stringResource(R.string.list_loading))
+                    loadError != null -> ScrollableFill {
+                        ErrorContent(
+                            title = stringResource(R.string.list_load_error_title),
+                            message = loadError.asString(),
+                            onRetry = onRetry,
+                        )
                     }
                     state.showEmptyCollection -> ScrollableFill {
                         EmptyContent(
@@ -242,12 +234,8 @@ fun GameListScreen(
                     else -> GameList(
                         games = state.games,
                         listState = listState,
-                        isLoadingMore = state.isLoadingMore,
-                        loadMoreFailed = state.loadMoreFailed,
                         contentPadding = PaddingValues(bottom = bottomPadding + 88.dp),
                         onGameClick = onGameClick,
-                        onLoadMore = onLoadMore,
-                        onRetryLoadMore = onRetryLoadMore,
                     )
                 }
             }
@@ -282,55 +270,39 @@ private fun SearchField(
     )
 }
 
+/** Result count and, at its end, the sync status. */
 @Composable
 private fun ResultsHeader(state: GameListUiState) {
-    Box(
+    Row(
         Modifier
             .fillMaxWidth()
             .heightIn(min = 36.dp)
             .padding(horizontal = 16.dp),
-        contentAlignment = Alignment.CenterStart,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        val hasCount = state.loadError == null && !state.showEmptyCollection && !(state.isLoading && state.games.isEmpty())
-        if (hasCount) {
-            Text(
-                text = pluralStringResource(R.plurals.games_count, state.totalItems, state.totalItems),
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
-            )
+        Box(Modifier.weight(1f)) {
+            val hasCount = !state.isLoading && state.loadError == null && !state.showEmptyCollection
+            if (hasCount) {
+                Text(
+                    text = pluralStringResource(R.plurals.games_count, state.totalItems, state.totalItems),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+            }
         }
+        SyncStatusIndicator(state.sync)
     }
-    if (state.isLoading && state.games.isNotEmpty()) {
-        LinearProgressIndicator(Modifier.fillMaxWidth())
-    } else {
-        Spacer(Modifier.height(4.dp))
-    }
+    Spacer(Modifier.height(4.dp))
 }
 
 @Composable
 private fun GameList(
     games: List<Game>,
     listState: LazyListState,
-    isLoadingMore: Boolean,
-    loadMoreFailed: Boolean,
     contentPadding: PaddingValues,
     onGameClick: (String) -> Unit,
-    onLoadMore: () -> Unit,
-    onRetryLoadMore: () -> Unit,
 ) {
-    // Re-evaluated after every appended page, so a short page right at the end still triggers the next one.
-    LaunchedEffect(listState, games.size) {
-        snapshotFlow {
-            val layoutInfo = listState.layoutInfo
-            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
-            layoutInfo.totalItemsCount > 0 && lastVisible >= layoutInfo.totalItemsCount - 1 - LOAD_MORE_THRESHOLD
-        }
-            .distinctUntilChanged()
-            .filter { it }
-            .collect { onLoadMore() }
-    }
-
     LazyColumn(
         state = listState,
         contentPadding = contentPadding,
@@ -342,29 +314,6 @@ private fun GameList(
                 onClick = { onGameClick(game.id) },
                 modifier = Modifier.animateItem(),
             )
-        }
-        item(key = "footer", contentType = "footer") {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(min = 64.dp)
-                    .padding(16.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                when {
-                    isLoadingMore -> CircularProgressIndicator()
-                    loadMoreFailed -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(
-                            stringResource(R.string.list_load_more_error),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        OutlinedButton(onClick = onRetryLoadMore, modifier = Modifier.padding(top = 8.dp)) {
-                            Text(stringResource(R.string.action_retry))
-                        }
-                    }
-                }
-            }
         }
     }
 }

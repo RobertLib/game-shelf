@@ -16,11 +16,11 @@ final class GameFormViewModel {
     private(set) var hasAttemptedSave = false
 
     @ObservationIgnored private let initialDraft: GameDraft
-    @ObservationIgnored private let service: any GameService
+    @ObservationIgnored private let repository: GameRepository
 
-    init(mode: GameFormMode, service: any GameService) {
+    init(mode: GameFormMode, repository: GameRepository) {
         self.mode = mode
-        self.service = service
+        self.repository = repository
         let draft = switch mode {
         case .create: GameDraft()
         case .edit(let game): GameDraft(game: game)
@@ -42,24 +42,25 @@ final class GameFormViewModel {
         draft.errors(includingRequired: hasAttemptedSave)
     }
 
-    /// Saves the draft; returns the stored game on success.
-    func save() async -> Game? {
+    /// Saves the draft on the device (it works offline; the sync engine pushes it).
+    /// Returns `true` when the form can close.
+    func save() async -> Bool {
         hasAttemptedSave = true
-        guard !isSaving, let request = draft.makeRequest() else { return nil }
+        guard !isSaving, let request = draft.makeRequest() else { return false }
         isSaving = true
         defer { isSaving = false }
         do {
             switch mode {
             case .create:
-                return try await service.create(request)
+                try await repository.create(request)
             case .edit(let game):
-                return try await service.update(id: game.id, with: request)
+                // Only the fields changed in this form are saved, on top of the current stored game.
+                try await repository.update(id: game.id, with: request, basedOn: game)
             }
+            return true
         } catch {
-            if !ErrorMessage.isCancellation(error) {
-                saveError = ErrorMessage.message(for: error)
-            }
-            return nil
+            saveError = ErrorMessage.message(for: error)
+            return false
         }
     }
 }

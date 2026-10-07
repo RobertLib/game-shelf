@@ -1,82 +1,46 @@
 import Foundation
 import Observation
 
+/// Detail of one game. Follows the stored game, so a sync updates the screen, and a game deleted
+/// on another device turns into "Game not found.".
 @Observable
 @MainActor
 final class GameDetailViewModel {
-    private(set) var game: Game
-    private(set) var isMissing = false
-    private(set) var isUpdatingFavorite = false
-    private(set) var isDeleting = false
+    let gameID: Game.ID
+    let repository: GameRepository
+    /// The user deleted the game here; the screen is closing.
+    private(set) var isDeleted = false
     var errorMessage: String?
 
-    @ObservationIgnored private let service: any GameService
-    @ObservationIgnored private let onChange: @MainActor (GameChange) -> Void
-
-    init(game: Game, service: any GameService, onChange: @escaping @MainActor (GameChange) -> Void) {
-        self.game = game
-        self.service = service
-        self.onChange = onChange
+    init(gameID: Game.ID, repository: GameRepository) {
+        self.gameID = gameID
+        self.repository = repository
     }
 
-    /// Reloads the game. Background refreshes fail silently because the list's copy is still shown.
-    func refresh(userInitiated: Bool) async {
-        do {
-            let fresh = try await service.game(id: game.id)
-            if fresh != game {
-                game = fresh
-                onChange(.updated(fresh))
-            }
-        } catch let error as APIError where error.code == .gameNotFound {
-            isMissing = true
-            onChange(.deleted(game.id))
-        } catch {
-            if userInitiated, !ErrorMessage.isCancellation(error) {
-                errorMessage = ErrorMessage.message(for: error)
-            }
-        }
+    var game: Game? {
+        repository.game(id: gameID)
     }
 
-    /// Optimistically flips the favorite flag; `PUT` needs the full object.
+    /// Saved locally at once; the sync engine pushes it.
     func toggleFavorite() async {
-        guard !isUpdatingFavorite else { return }
-        let previous = game
-        var request = SaveGameRequest(game: game)
-        request.favorite.toggle()
-        game.favorite = request.favorite
-        isUpdatingFavorite = true
-        defer { isUpdatingFavorite = false }
+        guard let game else { return }
         do {
-            game = try await service.update(id: game.id, with: request)
-            onChange(.updated(game))
+            try await repository.setFavorite(!game.favorite, id: gameID)
         } catch {
-            game = previous
-            if !ErrorMessage.isCancellation(error) {
-                errorMessage = ErrorMessage.message(for: error)
-            }
+            errorMessage = ErrorMessage.message(for: error)
         }
     }
 
-    /// Returns `true` when the game is gone and the screen should close.
+    /// Removes the game at once. Returns `true` when the screen should close.
     func delete() async -> Bool {
-        isDeleting = true
-        defer { isDeleting = false }
         do {
-            try await service.delete(id: game.id)
-        } catch let error as APIError where error.code == .gameNotFound {
-            // Already deleted elsewhere – same outcome.
+            isDeleted = true
+            try await repository.delete(id: gameID)
+            return true
         } catch {
-            if !ErrorMessage.isCancellation(error) {
-                errorMessage = ErrorMessage.message(for: error)
-            }
+            isDeleted = false
+            errorMessage = ErrorMessage.message(for: error)
             return false
         }
-        onChange(.deleted(game.id))
-        return true
-    }
-
-    func didSave(_ game: Game) {
-        self.game = game
-        onChange(.updated(game))
     }
 }
