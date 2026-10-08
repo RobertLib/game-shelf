@@ -5,12 +5,10 @@ import { normalizeBarcode } from './barcode.js';
 import { BarcodeLookupDto } from './dto/barcode-lookup.dto.js';
 import { IgdbClient } from './igdb.client.js';
 import type { IgdbGameDetails } from './igdb-match.js';
+import { LookupUnavailableError } from './lookup-unavailable.error.js';
 import { type ParsedProductTitle, parseProductTitle } from './product-title.js';
-import {
-  LookupUnavailableError,
-  UpcItemDbClient,
-  type UpcProduct,
-} from './upcitemdb.client.js';
+import { limit } from './text-limit.js';
+import { UpcItemDbClient, type UpcProduct } from './upcitemdb.client.js';
 
 const FOUND_TTL_MS = 7 * 24 * 60 * 60_000;
 /** Unknown codes are asked again sooner: the database keeps growing. */
@@ -138,12 +136,4 @@ export function mergeLookup(
       null,
     sources: game ? ['UPCitemdb', 'IGDB'] : ['UPCitemdb'],
   };
-}
-
-function limit(
-  text: string | null | undefined,
-  maxLength: number,
-): string | null {
-  const trimmed = text?.trim();
-  return trimmed ? trimmed.slice(0, maxLength).trim() : null;
 }

@@ -24,6 +24,10 @@ A catalogue for collectors of computer and console games. A monorepo with three 
   it up in [UPCitemdb](https://www.upcitemdb.com) (barcode → product) and [IGDB](https://www.igdb.com)
   (genre, developer, publisher, release year, cover) and the form is prefilled with what they know.
   It also warns when the game is already in the collection. See [Barcode lookup](#barcode-lookup).
+- **Finding a game by its title:** typing a game in by hand, tap the magnifier in the Title field,
+  type the title and pick the game from the list of matches in [IGDB](https://www.igdb.com); the form
+  is filled in with its title, genre, developer, publisher, release year, cover and platform. See
+  [Game search](#game-search).
 - List grouped by platform (can be turned off in the sort menu), with full-text search, sorting
   and advanced filters: platforms, status, format, region, completeness, condition, play status, genre, publisher, developer,
   storage location, favorites, with / without cover, and ranges of release year, purchase price,
@@ -90,6 +94,7 @@ In short:
 | POST | `/api/v1/games` | new game; idempotent with a client-generated `id` |
 | GET / PUT / PATCH / DELETE | `/api/v1/games/{id}` | detail / replace / change some fields / delete |
 | GET | `/api/v1/lookup/barcode/{barcode}` | game details for a scanned EAN / UPC |
+| GET | `/api/v1/lookup/games?q=…` | games matching a title, to prefill a game typed in by hand |
 
 Errors always have the shape `{ statusCode, code, message, details? }`; the apps show their own
 messages based on `code`.
@@ -110,6 +115,15 @@ the answers in memory:
 
 Coverage of European (PAL) and older games in UPCitemdb is patchy; when a code is not found, the
 form keeps the barcode and the rest is filled in by hand.
+
+## Game search
+
+Searching by title uses only IGDB, so it **needs `IGDB_CLIENT_ID` and `IGDB_CLIENT_SECRET`** (see
+above); without them the apps show "The game database isn't available right now". The API leaves out
+DLC and other add-ons and editions of a game, lists games on the platform already chosen in the form
+first, and caches results for a day. Picking a game replaces the title, genre, developer, publisher,
+release year and cover in the form; when the game came out on several platforms and none is chosen
+yet, the app asks which one the copy is for.
 
 ## Tests
 

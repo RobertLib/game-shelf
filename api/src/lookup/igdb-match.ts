@@ -1,4 +1,4 @@
-import type { Platform } from '../generated/prisma/enums.js';
+import { Platform } from '../generated/prisma/enums.js';
 import { detectPlatform } from './product-title.js';
 
 /** A game from the IGDB `games` endpoint with the fields {@link IGDB_GAME_FIELDS}. */
@@ -47,6 +47,8 @@ const MIN_SIMILARITY = 0.5;
 
 /** IGDB game types that are not a game sold on its own: DLC, mod, episode, season, fork, pack, update. */
 const ADD_ON_TYPES = new Set([1, 5, 6, 7, 12, 13, 14]);
+
+const PLATFORM_ORDER: readonly Platform[] = Object.values(Platform);
 
 /** IGDB genres from the most telling one, renamed to how collectors usually write them. */
 const GENRES: ReadonlyArray<readonly [igdb: string, label: string]> = [
@@ -106,9 +108,7 @@ export function pickBestMatch(
     if (similarity < MIN_SIMILARITY) continue;
     let score = similarity;
     if (platform && gamePlatforms(game).includes(platform)) score += 0.2;
-    if (game.game_type !== undefined && ADD_ON_TYPES.has(game.game_type)) {
-      score -= 0.3;
-    }
+    if (isAddOn(game)) score -= 0.3;
     if (!best || score > best.score) best = { game, score };
   }
   return best?.game ?? null;
@@ -122,6 +122,11 @@ export function titleSimilarity(a: string, b: string): number {
   let common = 0;
   for (const word of wordsA) if (wordsB.has(word)) common++;
   return common / (wordsA.size + wordsB.size - common);
+}
+
+/** DLC, a mod, an episode or another add-on rather than a game sold on its own. */
+export function isAddOn(game: IgdbGame): boolean {
+  return game.game_type !== undefined && ADD_ON_TYPES.has(game.game_type);
 }
 
 export function toGameDetails(game: IgdbGame): IgdbGameDetails {
@@ -145,11 +150,14 @@ export function toGameDetails(game: IgdbGame): IgdbGameDetails {
   };
 }
 
+/** The game's platforms the collection knows, in the order of the Platform enum. */
 function gamePlatforms(game: IgdbGame): Platform[] {
   const platforms = (game.platforms ?? [])
     .map((platform) => detectPlatform(platform.name))
     .filter((platform) => platform !== null);
-  return [...new Set(platforms)];
+  return [...new Set(platforms)].sort(
+    (a, b) => PLATFORM_ORDER.indexOf(a) - PLATFORM_ORDER.indexOf(b),
+  );
 }
 
 function pickGenre(names: string[]): string | null {

@@ -49,6 +49,11 @@ Numbers, prices and dates are formatted with the **device locale** (prices alway
   `404 BARCODE_NOT_FOUND` = no database knows the code (not an error for the user),
   `503 LOOKUP_UNAVAILABLE` = the database can't be reached now. Unlike the collection it needs a
   connection; nothing is saved by it.
+- Game search: `GET lookup/games?q=…&platform=…` → `GameSearchResponse { items, sources }`, at most 20
+  `GameSearchResult`s (IGDB id, title, platforms, genre, developer, publisher, release year, cover URL),
+  the most likely first; an empty `items` is "nothing found". `q` is 2–100 characters; `platform` (optional)
+  is the platform chosen in the form, games on it are listed first. `503 LOOKUP_UNAVAILABLE` = the database
+  can't be reached now. Needs a connection; nothing is saved by it.
 
 ## Error messages (by `code`)
 
@@ -127,6 +132,8 @@ currency 3 letters (default CZK).
    - Rating & play: Play status, Rating 1–10 (clearable), Favorite, Notes (multiline).
    - Text fields offer suggestions from facets (genre, publisher, developer, storage location).
    - The Barcode field has a "Scan barcode" button (in add and edit mode).
+   - The Title field has a "Search game database" button (in add and edit mode), see
+     "Searching the game database".
    - Inline validation messages, ask before discarding unsaved changes ("Discard changes?").
      Saving is local and works offline; after save, go back – the list and detail update by themselves.
 7. **Profile & settings** – email, display name; "Collection" (number of games and platforms, from the
@@ -170,6 +177,48 @@ currency 3 letters (default CZK).
    The card can be dismissed (except while waiting). A typed code that is not 8–14 digits is put
    into the field (form validation reports it) and not looked up.
 4. Nothing is saved until the user taps Save; leaving the form asks "Discard changes?".
+
+## Searching the game database
+
+Typing a game in by hand, the user can find it in the game database (IGDB, through the API) by its title
+and have the form filled in from it.
+
+1. **Entry** – the "Search game database" button at the end of the Title field (Android: a magnifier
+   `IconButton` as the field's trailing icon; iOS: a borderless `magnifyingglass` icon button at the end of
+   the Title row). It opens the search screen (Android: a full-screen dialog with a top app bar; iOS: a sheet
+   with its own navigation stack). The search field is focused and holds the current title (trimmed); when
+   that has at least 2 characters, it is searched right away.
+2. **Search screen** – title "Search game database", a close button (Android: the X navigation icon
+   "Close"; iOS: "Cancel"); closing changes nothing. A search field with the prompt "Game title":
+   - searches as the user types: ~400 ms after the last change, only when the trimmed text has at least
+     2 characters, with `platform` = the platform chosen in the form, if any. A newer search replaces an older
+     one; an answer that comes late is ignored;
+   - fewer than 2 characters: "Type the title of the game you're adding." and no results;
+   - searching with nothing shown yet: progress + "Searching…"; searching again keeps the previous results
+     on screen with a small progress indicator until the new ones arrive;
+   - results: one row per game – cover thumbnail (`coverImageUrl`; a placeholder without it), title,
+     a secondary line "2017 · Nintendo Switch, Wii U" (release year and platform labels, each only when
+     known; more than 3 platforms are shortened to the first 3 + "+2"), and the developer on a third line
+     when known. Under the list "Source: IGDB" (the `sources`). Each row reads as one accessibility element;
+   - nothing found: "No games found for “<query>”." and "Check the spelling, or fill in the details
+     yourself.";
+   - failure: "Couldn't search the game database. " + the error message (see Error messages) + "Try again".
+3. **Platform of the picked game** – tapping a result picks it:
+   - the form already has a platform → it stays;
+   - otherwise the game lists exactly one platform → that one;
+   - it lists several → ask "Which platform is your copy for?" with a choice per platform (in the listed
+     order), "Other platform" (leaves Platform empty) and "Cancel" (back to the results). Android: an
+     `AlertDialog` with the platforms as a list and the two text buttons; iOS: a `confirmationDialog`;
+   - it lists none → Platform stays empty.
+4. **Filling the form** – the search screen closes and the picked game **replaces** the Title, Genre,
+   Developer, Publisher, Release year and Cover image URL (the user chose this game, unlike a scanned
+   barcode, which only fills empty fields); a value the database doesn't know leaves its field as it is.
+   Platform follows point 3; no other field changes. The card above the form (the one used by barcode
+   lookups) shows "Details filled in from the game database. Check them before saving." and
+   "Source: IGDB" (the `sources`); a barcode lookup still in progress is cancelled. When another game in
+   the collection has the same title (trimmed, ignoring letter case) and the same platform, the card also
+   shows "Already in your collection: <title> (<platform>)" – a warning only.
+5. Nothing is saved until the user taps Save; leaving the form asks "Discard changes?".
 
 ## Labels
 

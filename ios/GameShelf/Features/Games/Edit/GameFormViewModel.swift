@@ -6,7 +6,8 @@ enum GameFormMode: Hashable {
     case edit(Game)
 }
 
-/// Progress and outcome of looking up a scanned barcode.
+/// Progress and outcome of filling the form from the game database: looking up a scanned barcode,
+/// or (always `.found`) a game picked in the database search.
 enum BarcodeLookupState: Equatable {
     case loading
     case found(sources: [String])
@@ -16,6 +17,7 @@ enum BarcodeLookupState: Equatable {
 
 /// The add / edit form. Saving is local and works offline. A scanned barcode is looked up in the game
 /// databases behind the API, which needs a connection; what they know fills the fields still empty.
+/// A game picked in the database search (``GameSearchView``) replaces what the fields hold.
 @Observable
 @MainActor
 final class GameFormViewModel {
@@ -25,7 +27,8 @@ final class GameFormViewModel {
     private(set) var isSaving = false
     private(set) var hasAttemptedSave = false
     private(set) var lookupState: BarcodeLookupState?
-    /// A game in the collection with the scanned barcode.
+    /// Another game in the collection with the scanned barcode, or with the title and platform of the
+    /// game picked in the database search.
     private(set) var duplicate: Game?
 
     @ObservationIgnored private let initialDraft: GameDraft
@@ -116,6 +119,20 @@ final class GameFormViewModel {
             state = .failed(ErrorMessage.message(for: error))
         }
         lookupState = state
+    }
+
+    /// Fills the form from a game picked in the database search: it replaces the details the database
+    /// knows (see ``GameDraft/fill(fromSearch:platform:)``). A barcode lookup still in progress is cancelled.
+    func fill(fromSearch pick: GameSearchPick) {
+        lookupGeneration += 1
+        draft.fill(fromSearch: pick.game, platform: pick.platform)
+        lookupState = .found(sources: pick.sources)
+        let platform = draft.platform
+        let title = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        duplicate = repository.games.first { game in
+            game.id != editedGameID && game.platform == platform
+                && game.title.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(title) == .orderedSame
+        }
     }
 
     private var editedGameID: Game.ID? {

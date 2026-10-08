@@ -2,8 +2,9 @@ import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import type { App } from 'supertest/types.js';
 import { IgdbClient } from '../src/lookup/igdb.client.js';
+import type { IgdbGame } from '../src/lookup/igdb-match.js';
+import { LookupUnavailableError } from '../src/lookup/lookup-unavailable.error.js';
 import {
-  LookupUnavailableError,
   UpcItemDbClient,
   type UpcProduct,
 } from '../src/lookup/upcitemdb.client.js';
@@ -34,7 +35,36 @@ const upcItemDb = {
       : Promise.resolve(product ?? null);
   },
 };
+/** IGDB search results by query; the search itself is not stood in for. */
+const igdbGames: Record<string, IgdbGame[] | Error> = {
+  zelda: [
+    {
+      id: 1029,
+      name: 'The Legend of Zelda: Ocarina of Time',
+      first_release_date: 911606400,
+      game_type: 0,
+      genres: [{ id: 31, name: 'Adventure' }],
+      platforms: [{ id: 4, name: 'Nintendo 64' }],
+      cover: { id: 1, image_id: 'co3nnx' },
+      involved_companies: [
+        {
+          id: 1,
+          developer: true,
+          publisher: true,
+          company: { id: 70, name: 'Nintendo' },
+        },
+      ],
+    },
+  ],
+  offline: new LookupUnavailableError('IGDB responded with 500'),
+};
 const igdb = {
+  searchGames: (text: string) => {
+    const games = igdbGames[text] ?? [];
+    return games instanceof Error
+      ? Promise.reject(games)
+      : Promise.resolve(games);
+  },
   findGame: (title: string) =>
     Promise.resolve(
       title === 'Mario Kart 8 Deluxe'
@@ -52,7 +82,7 @@ const igdb = {
     ),
 };
 
-describe('Barcode lookup (e2e)', () => {
+describe('Lookup (e2e)', () => {
   let app: INestApplication<App>;
   let user: Session;
 
@@ -62,6 +92,12 @@ describe('Barcode lookup (e2e)', () => {
     );
     return session ? req.auth(session.accessToken, { type: 'bearer' }) : req;
   };
+
+  const search = (query: Record<string, string>, session: Session = user) =>
+    request(app.getHttpServer())
+      .get(`${API}/lookup/games`)
+      .query(query)
+      .auth(session.accessToken, { type: 'bearer' });
 
   beforeAll(async () => {
     app = await createTestApp((builder) =>
@@ -115,6 +151,45 @@ describe('Barcode lookup (e2e)', () => {
 
   it('reports an unavailable database', async () => {
     const res = await lookup('711719541028').expect(503);
+    expect(res.body.code).toBe('LOOKUP_UNAVAILABLE');
+  });
+
+  it('searches games by title', async () => {
+    const res = await search({ q: '  zelda ', platform: 'N64' }).expect(200);
+    expect(res.body).toEqual({
+      items: [
+        {
+          igdbId: 1029,
+          title: 'The Legend of Zelda: Ocarina of Time',
+          platforms: ['N64'],
+          genre: 'Adventure',
+          developer: 'Nintendo',
+          publisher: 'Nintendo',
+          releaseYear: 1998,
+          coverImageUrl:
+            'https://images.igdb.com/igdb/image/upload/t_cover_big/co3nnx.jpg',
+        },
+      ],
+      sources: ['IGDB'],
+    });
+  });
+
+  it('finds nothing without an error', async () => {
+    const res = await search({ q: 'no such game' }).expect(200);
+    expect(res.body).toEqual({ items: [], sources: ['IGDB'] });
+  });
+
+  it('validates the search query', async () => {
+    const short = await search({ q: ' z ' }).expect(400);
+    expect(short.body.code).toBe('VALIDATION_FAILED');
+    const platform = await search({ q: 'zelda', platform: 'GAMEBOY' }).expect(
+      400,
+    );
+    expect(platform.body.code).toBe('VALIDATION_FAILED');
+  });
+
+  it('reports an unavailable game database', async () => {
+    const res = await search({ q: 'offline' }).expect(503);
     expect(res.body.code).toBe('LOOKUP_UNAVAILABLE');
   });
 });

@@ -9,6 +9,7 @@ import {
   pickBestMatch,
   toGameDetails,
 } from './igdb-match.js';
+import { LookupUnavailableError } from './lookup-unavailable.error.js';
 
 const TOKEN_URL = 'https://id.twitch.tv/oauth2/token';
 const GAMES_URL = 'https://api.igdb.com/v4/games';
@@ -18,7 +19,8 @@ const TOKEN_EXPIRY_MARGIN_MS = 5 * 60_000;
 
 /**
  * Client of the IGDB game database (https://api-docs.igdb.com), authenticated
- * with a Twitch app access token. Optional: without credentials it finds nothing.
+ * with a Twitch app access token. Optional: without credentials barcode lookups
+ * get no details from it and searching by title is unavailable.
  */
 @Injectable()
 export class IgdbClient {
@@ -43,7 +45,10 @@ export class IgdbClient {
   ): Promise<IgdbGameDetails | null> {
     if (!this.credentials) return null;
     try {
-      const game = pickBestMatch(await this.search(title), title, platform);
+      const candidates = await this.query(
+        `${searchClause(title)} fields ${IGDB_GAME_FIELDS}; limit 10;`,
+      );
+      const game = pickBestMatch(candidates, title, platform);
       return game ? toGameDetails(game) : null;
     } catch (e) {
       this.logger.warn(`IGDB search for "${title}" failed: ${String(e)}`);
@@ -51,10 +56,30 @@ export class IgdbClient {
     }
   }
 
-  private async search(title: string): Promise<IgdbGame[]> {
-    const query =
-      `search "${title.replace(/["\\]/g, ' ')}"; ` +
-      `fields ${IGDB_GAME_FIELDS}; limit 10;`;
+  /**
+   * Games matching a text typed by the user, in IGDB's order of relevance;
+   * editions of a game (versions) are left out, the game itself stays.
+   * @throws LookupUnavailableError when IGDB is not configured or cannot answer.
+   */
+  async searchGames(text: string, limit: number): Promise<IgdbGame[]> {
+    if (!this.credentials) {
+      throw new LookupUnavailableError(
+        'IGDB_CLIENT_ID and IGDB_CLIENT_SECRET are not set',
+      );
+    }
+    try {
+      return await this.query(
+        `${searchClause(text)} fields ${IGDB_GAME_FIELDS}; ` +
+          `where version_parent = null; limit ${limit};`,
+      );
+    } catch (e) {
+      throw new LookupUnavailableError(
+        `IGDB search for "${text}" failed: ${String(e)}`,
+      );
+    }
+  }
+
+  private async query(query: string): Promise<IgdbGame[]> {
     let response = await this.post(query, await this.accessToken());
     if (response.status === 401) {
       this.token = null;
@@ -112,4 +137,8 @@ export class IgdbClient {
     };
     return access_token;
   }
+}
+
+function searchClause(text: string): string {
+  return `search "${text.replace(/["\\]/g, ' ')}";`;
 }

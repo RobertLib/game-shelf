@@ -89,6 +89,24 @@ struct GameDraft: Equatable {
         region = region ?? lookup.region
     }
 
+    /// Fills in the game picked in the database search. Unlike a barcode lookup it replaces what the
+    /// fields hold (the user chose this game); a value the database doesn't know leaves its field as it is.
+    /// `platform`: the one chosen for the user's copy; `nil` leaves Platform as it is.
+    mutating func fill(fromSearch game: GameSearchResult, platform: Platform?) {
+        func replace(_ field: inout String, with value: String?) {
+            if let value, !value.isBlank { field = value }
+        }
+        replace(&title, with: game.title)
+        replace(&genre, with: game.genre)
+        replace(&developer, with: game.developer)
+        replace(&publisher, with: game.publisher)
+        replace(&releaseYear, with: game.releaseYear.map(String.init))
+        replace(&coverImageUrl, with: game.coverImageUrl)
+        if let platform {
+            self.platform = platform
+        }
+    }
+
     /// Validation messages per field. "Required" errors are only reported once the
     /// user tried to save, format errors immediately.
     func errors(includingRequired: Bool) -> [Field: String] {

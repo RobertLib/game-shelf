@@ -16,9 +16,11 @@ import cz.gameshelf.app.domain.collection.GameFacetsCalculator
 import cz.gameshelf.app.domain.model.Barcodes
 import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.domain.model.GameFacets
+import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.appContainer
 import cz.gameshelf.app.ui.common.toUiText
+import cz.gameshelf.app.ui.games.edit.search.GameSearchPick
 import cz.gameshelf.app.ui.navigation.GameEdit
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -44,9 +46,15 @@ data class GameEditUiState(
     val isSaving: Boolean = false,
     val showDiscardDialog: Boolean = false,
     val suggestions: FormSuggestions = FormSuggestions(),
+    /** Filling the form from the game database: a barcode lookup, or a game picked in the search. */
     val lookup: BarcodeLookupStatus? = null,
-    /** A game in the collection with the scanned barcode. */
+    /**
+     * A game in the collection like the one filled in: with the scanned barcode, or with the title and
+     * platform of the game picked in the search.
+     */
     val duplicate: Game? = null,
+    /** "Search game database" is open. */
+    val showGameSearch: Boolean = false,
 ) {
     val hasChanges: Boolean get() = form != initialForm
     val canSave: Boolean get() = !isLoading && loadError == null && !isSaving
@@ -60,10 +68,14 @@ data class FormSuggestions(
     val storageLocations: List<String> = emptyList(),
 )
 
-/** Progress and outcome of looking up a scanned barcode. */
+/**
+ * Progress and outcome of filling the form from the game database: looking up a scanned barcode, or a
+ * game picked in the database search (always [Found]).
+ */
 sealed interface BarcodeLookupStatus {
     data object Loading : BarcodeLookupStatus
 
+    /** The form was filled in; [sources] are the databases to credit. */
     data class Found(val sources: List<String>) : BarcodeLookupStatus
 
     data object NotFound : BarcodeLookupStatus
@@ -81,7 +93,8 @@ sealed interface GameEditEvent {
 /**
  * Add / edit form. The game is read from and saved to the local collection, so saving works offline.
  * A scanned barcode is looked up in the game databases behind the API, which needs a connection; what
- * they know fills the fields that are still empty.
+ * they know fills the fields that are still empty. A game picked in the database search (see
+ * [GameSearchPick]) replaces the fields it knows instead.
  */
 class GameEditViewModel(
     savedStateHandle: SavedStateHandle,
@@ -102,6 +115,7 @@ class GameEditViewModel(
     /** After the first save attempt, errors follow the input live. */
     private var validateOnChange = false
 
+    /** The barcode lookup, or the duplicate check after a search pick. */
     private var lookupJob: Job? = null
 
     init {
@@ -193,6 +207,36 @@ class GameEditViewModel(
                 is BarcodeLookupResult.Failed -> BarcodeLookupStatus.Failed(result.error.toUiText())
             }
             _uiState.update { it.copy(lookup = status) }
+        }
+    }
+
+    fun openGameSearch() = _uiState.update { it.copy(showGameSearch = true) }
+
+    fun closeGameSearch() = _uiState.update { it.copy(showGameSearch = false) }
+
+    /**
+     * A game picked in the database search: replaces what the database knows about it and closes the search.
+     * A barcode lookup still in progress is cancelled, so it can't overwrite the pick.
+     */
+    fun applyGameSearchPick(pick: GameSearchPick) {
+        lookupJob?.cancel()
+        updateForm { it.fillFrom(pick.game, pick.platform) }
+        _uiState.update {
+            it.copy(showGameSearch = false, lookup = BarcodeLookupStatus.Found(pick.sources), duplicate = null)
+        }
+        val form = _uiState.value.form
+        lookupJob = viewModelScope.launch {
+            val duplicate = findSameGame(form.title, form.platform)
+            _uiState.update { it.copy(duplicate = duplicate) }
+        }
+    }
+
+    /** Another game in the collection with the same title (trimmed, ignoring case) on the same platform. */
+    private suspend fun findSameGame(title: String, platform: Platform?): Game? {
+        if (platform == null) return null
+        val trimmed = title.trim()
+        return repository.games.first().firstOrNull { game ->
+            game.id != gameId && game.platform == platform && game.title.trim().equals(trimmed, ignoreCase = true)
         }
     }
 

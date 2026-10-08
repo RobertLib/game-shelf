@@ -58,7 +58,8 @@ export class Env {
 
   /**
    * Twitch application credentials for IGDB, which adds genre, developer,
-   * publisher, release year and cover to barcode lookups. Optional.
+   * publisher, release year and cover to barcode lookups and is needed for
+   * searching games by title. Optional.
    */
   @IsOptional()
   @IsString()

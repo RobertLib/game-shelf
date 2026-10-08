@@ -30,6 +30,37 @@ enum PreviewData {
 
     static let facets = GameFacets(games: games)
 
+    /// Games of the game database, for the database search.
+    static let searchResults: [GameSearchResult] = [
+        GameSearchResult(
+            igdbId: 26758, title: "Mario Kart 8 Deluxe", platforms: [.switch], genre: "Racing",
+            developer: "Nintendo EPD", publisher: "Nintendo", releaseYear: 2017,
+            coverImageUrl: "https://picsum.photos/seed/mk8dx/300/420"
+        ),
+        GameSearchResult(
+            igdbId: 2350, title: "Mario Kart 8", platforms: [.wiiU], genre: "Racing",
+            developer: "Nintendo EAD", publisher: "Nintendo", releaseYear: 2014, coverImageUrl: nil
+        ),
+        GameSearchResult(
+            igdbId: 1018, title: "Mario & Sonic at the Olympic Games", platforms: [.wii, .nintendoDS],
+            genre: "Sport", developer: "Sega Sports R&D", publisher: "Sega", releaseYear: 2007, coverImageUrl: nil
+        ),
+        GameSearchResult(
+            igdbId: 7346, title: "Mario + Rabbids Kingdom Battle", platforms: [.switch], genre: "Strategy",
+            developer: "Ubisoft Milan", publisher: "Ubisoft", releaseYear: 2017,
+            coverImageUrl: "https://picsum.photos/seed/rabbids/300/420"
+        ),
+        GameSearchResult(
+            igdbId: 1074, title: "Super Mario Bros.",
+            platforms: [.nes, .wii, .wiiU, .switch, .gameBoyAdvance, .nintendo3DS], genre: "Platform",
+            developer: nil, publisher: "Nintendo", releaseYear: 1985, coverImageUrl: nil
+        ),
+        GameSearchResult(
+            igdbId: 1070, title: "Mario Paint", platforms: [], genre: nil,
+            developer: nil, publisher: nil, releaseYear: nil, coverImageUrl: nil
+        ),
+    ]
+
     @MainActor
     static func sessionStore(signedIn: Bool) -> SessionStore {
         let session = signedIn ? StoredSession(accessToken: "preview", refreshToken: "preview", user: user) : nil

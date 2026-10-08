@@ -32,7 +32,7 @@ Demo account with ~40 games: `npm run build && npm run db:seed` → `demo@exampl
 src/
   auth/       sign-up, sign-in, refresh tokens, password change, account deletion, global JWT guard
   games/      games CRUD, filters (games.query.ts), facets for filter UIs
-  lookup/     barcode lookup: UPCitemdb + IGDB clients, listing title parsing, in-memory cache
+  lookup/     barcode lookup and game search: UPCitemdb + IGDB clients, listing title parsing, in-memory caches
   common/     error format, decorators, query parameter transforms
   config/     environment validation
   prisma/     PrismaService (lazy connection via @prisma/adapter-pg)
@@ -61,3 +61,9 @@ test/         e2e tests (supertest)
   for 7 days, unknown codes for 6 hours) and concurrent lookups of one code share one request,
   because the free UPCitemdb plan allows 100 lookups a day. The endpoint is limited to 30 calls/min.
   A UPC-A scanned as EAN-13 (leading `0`) is looked up by its 12 digits.
+- **Game search** (`GET /lookup/games?q=…&platform=…`): searches IGDB by title for a game typed in
+  by hand. Editions of a game (IGDB versions) and add-ons (DLC, mods, episodes …) are left out; IGDB's
+  order of relevance is kept, except that games on the platform chosen in the form come first and then
+  a game with exactly the typed title. At most 20 results, cached in memory per query for a day. The
+  apps search as the user types (debounced), so the endpoint allows 60 calls/min. Needs the IGDB
+  credentials; without them, or when IGDB fails, it answers `503 LOOKUP_UNAVAILABLE`.

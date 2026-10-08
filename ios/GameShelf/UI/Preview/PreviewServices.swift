@@ -45,6 +45,15 @@ extension SyncEngine {
     }
 }
 
+/// Game search for previews: the sample games whose title contains the query, after a short delay.
+struct PreviewGameSearchService: GameSearchService {
+    func search(_ query: String, platform: Platform?) async throws -> GameSearchResponse {
+        try await Task.sleep(for: .milliseconds(600))
+        let items = PreviewData.searchResults.filter { $0.title.localizedStandardContains(query) }
+        return GameSearchResponse(items: items, sources: ["IGDB"])
+    }
+}
+
 struct PreviewAuthService: AuthService {
     func login(email: String, password: String) async throws -> AuthResponse {
         try await Task.sleep(for: .milliseconds(600))

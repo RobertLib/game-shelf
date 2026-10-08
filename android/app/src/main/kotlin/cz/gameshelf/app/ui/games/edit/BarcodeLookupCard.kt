@@ -32,7 +32,10 @@ import cz.gameshelf.app.ui.common.asString
 import cz.gameshelf.app.ui.common.labelRes
 import cz.gameshelf.app.ui.theme.GameShelfTheme
 
-/** What the barcode lookup is doing or found, above the form; nothing when there is nothing to say. */
+/**
+ * What filling the form from the game database (a barcode lookup or a game picked in the search) is doing
+ * or found, above the form; nothing when there is nothing to say.
+ */
 @Composable
 fun BarcodeLookupCard(
     status: BarcodeLookupStatus?,

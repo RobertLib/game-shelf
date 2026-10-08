@@ -38,6 +38,7 @@ import cz.gameshelf.app.ui.components.ErrorContent
 import cz.gameshelf.app.ui.components.LoadingContent
 import cz.gameshelf.app.ui.components.NavigationIconButton
 import cz.gameshelf.app.ui.components.rememberBarcodeScanner
+import cz.gameshelf.app.ui.games.edit.search.GameSearchRoute
 import cz.gameshelf.app.ui.theme.GameShelfTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -75,11 +76,21 @@ fun GameEditRoute(
         snackbarHostState = snackbarHostState,
         onFormChange = viewModel::updateForm,
         onScanBarcode = scanBarcode,
+        onSearchGameDatabase = viewModel::openGameSearch,
         onRetryLookup = viewModel::retryLookup,
         onDismissLookup = viewModel::dismissLookup,
         onSave = viewModel::save,
         onClose = viewModel::requestClose,
     )
+
+    if (state.showGameSearch) {
+        GameSearchRoute(
+            initialQuery = state.form.title.trim(),
+            formPlatform = state.form.platform,
+            onPick = viewModel::applyGameSearchPick,
+            onClose = viewModel::closeGameSearch,
+        )
+    }
 
     if (state.showDiscardDialog) {
         ConfirmDialog(
@@ -101,6 +112,7 @@ fun GameEditScreen(
     snackbarHostState: SnackbarHostState,
     onFormChange: ((GameForm) -> GameForm) -> Unit,
     onScanBarcode: () -> Unit,
+    onSearchGameDatabase: () -> Unit,
     onRetryLookup: () -> Unit,
     onDismissLookup: () -> Unit,
     onSave: () -> Unit,
@@ -163,6 +175,7 @@ fun GameEditScreen(
                     suggestions = state.suggestions,
                     onFormChange = onFormChange,
                     onScanBarcode = onScanBarcode,
+                    onSearchGameDatabase = onSearchGameDatabase,
                 )
             }
         }
@@ -178,6 +191,7 @@ private fun GameEditScreenPreview() {
             snackbarHostState = SnackbarHostState(),
             onFormChange = {},
             onScanBarcode = {},
+            onSearchGameDatabase = {},
             onRetryLookup = {},
             onDismissLookup = {},
             onSave = {},

@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../config/env.js';
+import { LookupUnavailableError } from './lookup-unavailable.error.js';
 
 const TRIAL_URL = 'https://api.upcitemdb.com/prod/trial/lookup';
 const PAID_URL = 'https://api.upcitemdb.com/prod/v1/lookup';
@@ -24,9 +25,6 @@ interface UpcItemDbResponse {
     images?: string[];
   }[];
 }
-
-/** The barcode database cannot answer now (down, unreachable, daily limit used up). */
-export class LookupUnavailableError extends Error {}
 
 /** Client of https://www.upcitemdb.com – maps EAN / UPC codes to product listings. */
 @Injectable()

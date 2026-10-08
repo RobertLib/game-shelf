@@ -6,6 +6,7 @@ import cz.gameshelf.app.domain.model.Completeness
 import cz.gameshelf.app.domain.model.Condition
 import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.domain.model.GameFormat
+import cz.gameshelf.app.domain.model.GameSearchResult
 import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.domain.model.PlayStatus
 import cz.gameshelf.app.domain.model.Region
@@ -85,6 +86,23 @@ fun GameForm.fillFrom(lookup: BarcodeLookup) = copy(
     region = region ?: lookup.region,
     barcode = barcode.ifBlank { lookup.barcode },
 )
+
+/**
+ * Fills the form from a game picked in the database search. The user chose this game, so what the database
+ * knows replaces the title, genre, developer, publisher, release year and cover; a value it doesn't know
+ * (`null` or blank) leaves its field as it is, and so does a `null` [platform]. Nothing else changes.
+ */
+fun GameForm.fillFrom(game: GameSearchResult, platform: Platform?) = copy(
+    title = game.title.orKeep(title),
+    platform = platform ?: this.platform,
+    genre = game.genre.orKeep(genre),
+    developer = game.developer.orKeep(developer),
+    publisher = game.publisher.orKeep(publisher),
+    releaseYear = game.releaseYear?.toString() ?: releaseYear,
+    coverImageUrl = game.coverImageUrl.orKeep(coverImageUrl),
+)
+
+private fun String?.orKeep(current: String): String = if (isNullOrBlank()) current else this
 
 /** Fields that can carry a validation message. */
 enum class GameField {

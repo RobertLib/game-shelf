@@ -89,6 +89,11 @@ The release build is minified with R8; signing is not configured in the reposito
   an image with Google Play and the virtual scene camera, or type the code in the scanner. The
   scanned code goes to the form (`GameEdit(barcode = …)`), whose ViewModel looks it up through
   `data/lookup` (`GET lookup/barcode/{barcode}`) and fills only the empty fields.
+- **Game database search** (`ui/games/edit/search`): the magnifier in the Title field opens a
+  full-screen dialog with its own `GameSearchViewModel` (scoped to the dialog, so every opening starts
+  from the form's title); it searches `GET lookup/games` as the user types (debounced, a newer search
+  cancels the older one). The picked game replaces the form's title, genre, developer, publisher,
+  release year and cover.
 - **Manual DI**: `AppContainer` is created by `GameShelfApplication`; ViewModels are built with
   `viewModelFactory { initializer { … } }`. Images are loaded by Coil 3 over a shared OkHttp client.
 - The UI is English only. Numbers, prices (always in the game's currency) and dates follow the
@@ -103,7 +108,7 @@ cz.gameshelf.app
 ├── data/local      Room database (games, pending changes, sync state), LocalGameStore
 ├── data/sync       SyncEngine, pending changes, field diff, network / foreground monitors
 ├── data/games      GamesRepository (local reads and writes)
-├── data/lookup     BarcodeLookupRepository (barcode → game details, online only)
+├── data/lookup     BarcodeLookupRepository, GameSearchRepository (game database, online only)
 ├── di              AppContainer
 ├── domain/model    API models (Game, GameFacets, enums), filters, errors
 ├── domain/collection  local search / filter / sort engine and facets

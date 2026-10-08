@@ -847,6 +847,67 @@ paths:
       summary: Find a game by the barcode on its box
       tags:
         - lookup
+  /api/v1/lookup/games:
+    get:
+      description: "Searches the game database for games to prefill a new game with;
+        nothing is saved. An empty `items` list means nothing matches. 503
+        `LOOKUP_UNAVAILABLE`: the database cannot be reached or is not
+        configured."
+      operationId: searchGames
+      parameters:
+        - name: q
+          required: true
+          in: query
+          description: The title or words from it, as the user types them.
+          schema:
+            minLength: 2
+            maxLength: 100
+            example: mario kart
+            type: string
+        - name: platform
+          required: false
+          in: query
+          description: "Platform already chosen in the form: games released on it are
+            listed first."
+          schema:
+            $ref: "#/components/schemas/Platform"
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GameSearchResponse"
+        "400":
+          description: Invalid input (see `code` and `details`)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Missing, invalid or expired credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: An external service the endpoint relies on is unavailable; try
+            again later
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      security:
+        - bearer: []
+      summary: Find games by title
+      tags:
+        - lookup
 info:
   title: Game Shelf API
   description: >-
@@ -1831,4 +1892,73 @@ components:
         - publisher
         - releaseYear
         - coverImageUrl
+        - sources
+    GameSearchResult:
+      type: object
+      properties:
+        igdbId:
+          type: integer
+          description: ID of the game in IGDB; identifies the result in the list.
+          example: 26758
+        title:
+          type: string
+          maxLength: 200
+          example: Mario Kart 8 Deluxe
+        platforms:
+          type: array
+          description: Platforms the game came out on, in the order of the Platform enum.
+            Only platforms the collection knows are listed, so it can be empty.
+          example:
+            - SWITCH
+          items:
+            $ref: "#/components/schemas/Platform"
+        genre:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Racing
+        developer:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Nintendo EPD
+        publisher:
+          type: string
+          nullable: true
+          maxLength: 100
+          example: Nintendo
+        releaseYear:
+          type: integer
+          nullable: true
+          example: 2017
+        coverImageUrl:
+          type: string
+          format: uri
+          nullable: true
+      required:
+        - igdbId
+        - title
+        - platforms
+        - genre
+        - developer
+        - publisher
+        - releaseYear
+        - coverImageUrl
+    GameSearchResponse:
+      type: object
+      properties:
+        items:
+          description: At most 20 games, the most likely first; empty when nothing matches.
+          type: array
+          items:
+            $ref: "#/components/schemas/GameSearchResult"
+        sources:
+          description: Databases the games come from, to be shown as attribution.
+          example:
+            - IGDB
+          type: array
+          items:
+            type: string
+      required:
+        - items
         - sources

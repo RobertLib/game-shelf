@@ -127,6 +127,22 @@ describe('toGameDetails', () => {
     expect(genre([])).toBeNull();
   });
 
+  it('lists known platforms once, in the order of the Platform enum', () => {
+    const platforms = toGameDetails({
+      id: 1,
+      name: 'The Witcher 3: Wild Hunt',
+      platforms: [
+        { id: 130, name: 'Nintendo Switch' },
+        { id: 48, name: 'PlayStation 4' },
+        { id: 3, name: 'Linux' },
+        { id: 6, name: 'PC (Microsoft Windows)' },
+        { id: 167, name: 'PlayStation 5' },
+        { id: 49, name: 'Xbox One' },
+      ],
+    }).platforms;
+    expect(platforms).toEqual(['PC', 'PS4', 'PS5', 'XBOX_ONE', 'SWITCH']);
+  });
+
   it('leaves out what IGDB does not know', () => {
     expect(toGameDetails({ id: 1, name: ' Doom ' })).toEqual({
       title: 'Doom',

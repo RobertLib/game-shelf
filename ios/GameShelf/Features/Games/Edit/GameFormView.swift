@@ -5,6 +5,7 @@ struct GameFormView: View {
     @State private var model: GameFormViewModel
     @State private var isConfirmingDiscard = false
     @State private var isScanning = false
+    @State private var isSearchingDatabase = false
     @FocusState private var focusedField: GameDraft.Field?
     @Environment(FacetsStore.self) private var facets
     @Environment(\.barcodeLookup) private var barcodeLookup
@@ -39,6 +40,14 @@ struct GameFormView: View {
                 Task { await model.scanned(code, using: barcodeLookup) }
             }
         }
+        .sheet(isPresented: $isSearchingDatabase) {
+            GameSearchView(
+                query: model.draft.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                platform: model.draft.platform
+            ) { pick in
+                withAnimation { model.fill(fromSearch: pick) }
+            }
+        }
         .interactiveDismissDisabled(model.hasChanges)
         .confirmationDialog("Discard changes?", isPresented: $isConfirmingDiscard, titleVisibility: .visible) {
             Button("Discard changes", role: .destructive) { dismiss() }
@@ -58,7 +67,8 @@ struct GameFormView: View {
 
     // MARK: Sections
 
-    /// What the barcode lookup is doing or found; nothing when there is nothing to say.
+    /// What the barcode lookup is doing or found, or that a game picked in the database search filled
+    /// the form; nothing when there is nothing to say.
     @ViewBuilder
     private var lookupSection: some View {
         if model.lookupState != nil || model.duplicate != nil {
@@ -124,11 +134,19 @@ struct GameFormView: View {
     private var basicSection: some View {
         Section("Basics") {
             ValidatedRow(error: errors[.title]) {
-                TextField("Title (required)", text: $model.draft.title)
-                    .font(.headline)
-                    .focused($focusedField, equals: .title)
-                    .accessibilityLabel("Title, required")
-                    .accessibilityIdentifier("gameForm.title")
+                HStack {
+                    TextField("Title (required)", text: $model.draft.title)
+                        .font(.headline)
+                        .focused($focusedField, equals: .title)
+                        .accessibilityLabel("Title, required")
+                        .accessibilityIdentifier("gameForm.title")
+                    Button("Search game database", systemImage: "magnifyingglass") {
+                        focusedField = nil
+                        isSearchingDatabase = true
+                    }
+                    .labelStyle(.iconOnly)
+                    .buttonStyle(.borderless)
+                }
             }
 
             NavigationLink {
@@ -355,6 +373,7 @@ private struct ValidatedRow<Content: View>: View {
     let sync = SyncEngine.preview()
     GameFormView(mode: .create, repository: sync.repository)
         .environment(FacetsStore(repository: sync.repository))
+        .environment(\.gameSearch, PreviewGameSearchService())
 }
 
 #Preview("Edit game") {

@@ -96,6 +96,17 @@ extension Endpoint where Response == BarcodeLookup {
     }
 }
 
+extension Endpoint where Response == GameSearchResponse {
+    /// `platform`: the one chosen in the form; the games on it are listed first.
+    static func gameSearch(query: String, platform: Platform?) -> Self {
+        var queryItems = [URLQueryItem(name: "q", value: query)]
+        if let platform {
+            queryItems.append(URLQueryItem(name: "platform", value: platform.rawValue))
+        }
+        return Endpoint(method: .get, path: "lookup/games", queryItems: queryItems)
+    }
+}
+
 private extension String {
     var urlPathComponent: String {
         addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? self

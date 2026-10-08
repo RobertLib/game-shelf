@@ -7,11 +7,13 @@ final class AppContainer {
     /// The offline collection (``SyncEngine/repository``) and its sync.
     let sync: SyncEngine
     let barcodeLookup: any BarcodeLookupService
+    let gameSearch: any GameSearchService
 
-    init(session: SessionStore, sync: SyncEngine, barcodeLookup: any BarcodeLookupService) {
+    init(session: SessionStore, sync: SyncEngine, barcodeLookup: any BarcodeLookupService, gameSearch: any GameSearchService) {
         self.session = session
         self.sync = sync
         self.barcodeLookup = barcodeLookup
+        self.gameSearch = gameSearch
     }
 
     static func live() -> AppContainer {
@@ -39,7 +41,8 @@ final class AppContainer {
                 userData: sync
             ),
             sync: sync,
-            barcodeLookup: RemoteBarcodeLookupService(api: api)
+            barcodeLookup: RemoteBarcodeLookupService(api: api),
+            gameSearch: RemoteGameSearchService(api: api)
         )
     }
 

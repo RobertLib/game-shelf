@@ -4,6 +4,7 @@ import cz.gameshelf.app.data.lookup.BarcodeLookupRepository
 import cz.gameshelf.app.data.lookup.BarcodeLookupResult
 import cz.gameshelf.app.domain.model.BarcodeLookup
 import cz.gameshelf.app.domain.model.Platform
+import kotlinx.coroutines.CompletableDeferred
 
 val MARIO_KART_LOOKUP = BarcodeLookup(
     barcode = "045496420055",
@@ -26,8 +27,12 @@ class FakeBarcodeLookupRepository(
 
     val lookedUp = mutableListOf<String>()
 
+    /** When set, lookups wait until it is completed. */
+    var gate: CompletableDeferred<Unit>? = null
+
     override suspend fun lookup(barcode: String): BarcodeLookupResult {
         lookedUp += barcode
+        gate?.await()
         return results[barcode] ?: BarcodeLookupResult.NotFound
     }
 }

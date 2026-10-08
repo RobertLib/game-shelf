@@ -4,11 +4,8 @@ import { normalizeBarcode } from './barcode.js';
 import { BarcodeLookupService } from './barcode-lookup.service.js';
 import type { IgdbClient } from './igdb.client.js';
 import type { IgdbGameDetails } from './igdb-match.js';
-import {
-  LookupUnavailableError,
-  type UpcItemDbClient,
-  type UpcProduct,
-} from './upcitemdb.client.js';
+import { LookupUnavailableError } from './lookup-unavailable.error.js';
+import type { UpcItemDbClient, UpcProduct } from './upcitemdb.client.js';
 
 const MARIO_KART: UpcProduct = {
   title: 'Mario Kart 8 Deluxe - Nintendo Switch',

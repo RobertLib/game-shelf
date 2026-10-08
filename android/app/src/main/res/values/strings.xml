@@ -237,6 +237,19 @@
     <string name="lookup_failed">Couldn\'t look up the barcode. %1$s</string>
     <string name="lookup_duplicate">Already in your collection: %1$s (%2$s)</string>
 
+    <!-- Game database search -->
+    <string name="action_search_game_database">Search game database</string>
+    <string name="game_search_title">Search game database</string>
+    <string name="game_search_field">Game title</string>
+    <string name="game_search_hint">Type the title of the game you\'re adding.</string>
+    <string name="game_search_searching">Searching…</string>
+    <string name="game_search_no_results">No games found for “%1$s”.</string>
+    <string name="game_search_no_results_message">Check the spelling, or fill in the details yourself.</string>
+    <string name="game_search_failed">Couldn\'t search the game database.</string>
+    <string name="game_search_more_platforms">+%1$d</string>
+    <string name="game_search_platform_question">Which platform is your copy for?</string>
+    <string name="game_search_other_platform">Other platform</string>
+
     <!-- Profile -->
     <string name="profile_title">Profile &amp; settings</string>
     <string name="profile_no_display_name">No display name</string>

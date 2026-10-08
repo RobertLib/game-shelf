@@ -9,6 +9,7 @@ import cz.gameshelf.app.domain.model.Condition
 import cz.gameshelf.app.domain.model.ErrorCode
 import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.domain.model.GameFormat
+import cz.gameshelf.app.domain.model.GameSearchResponse
 import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.domain.model.PlayStatus
 import cz.gameshelf.app.domain.model.Region
@@ -45,6 +46,34 @@ class ApiJsonTest {
         assertNull(lookup.region)
         assertEquals(2017, lookup.releaseYear)
         assertEquals(listOf("UPCitemdb", "IGDB"), lookup.sources)
+    }
+
+    @Test
+    fun `decodes a game search response without platforms unknown to the app`() {
+        val response = ApiJson.decodeFromString<GameSearchResponse>(
+            """
+            {"items": [
+              {"igdbId": 26758, "title": "Mario Kart 8 Deluxe", "platforms": ["SWITCH", "SWITCH_3", "WII_U"],
+               "genre": "Racing", "developer": "Nintendo EPD", "publisher": "Nintendo", "releaseYear": 2017,
+               "coverImageUrl": "https://images.igdb.com/igdb/image/upload/t_cover_big/co213p.jpg", "rating": 92},
+              {"igdbId": 7, "title": "Arcade Classic", "platforms": [], "genre": null, "developer": null,
+               "publisher": null, "releaseYear": null, "coverImageUrl": null}
+             ],
+             "sources": ["IGDB"]}
+            """,
+        )
+
+        val (marioKart, arcade) = response.items
+        assertEquals(26758, marioKart.igdbId)
+        assertEquals("Mario Kart 8 Deluxe", marioKart.title)
+        assertEquals(listOf(Platform.SWITCH, Platform.WII_U), marioKart.platforms)
+        assertEquals("Nintendo EPD", marioKart.developer)
+        assertEquals(2017, marioKart.releaseYear)
+        assertEquals(emptyList<Platform>(), arcade.platforms)
+        assertNull(arcade.genre)
+        assertNull(arcade.releaseYear)
+        assertNull(arcade.coverImageUrl)
+        assertEquals(listOf("IGDB"), response.sources)
     }
 
     @Test

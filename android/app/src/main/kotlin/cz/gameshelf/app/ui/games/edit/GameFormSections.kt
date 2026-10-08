@@ -51,6 +51,7 @@ fun GameFormContent(
     suggestions: FormSuggestions,
     onFormChange: ((GameForm) -> GameForm) -> Unit,
     onScanBarcode: () -> Unit,
+    onSearchGameDatabase: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     fun error(field: GameField): UiText? = errors[field]
@@ -63,6 +64,14 @@ fun GameFormContent(
                 label = stringResource(R.string.field_title_required),
                 error = error(GameField.TITLE),
                 capitalization = KeyboardCapitalization.Words,
+                trailingIcon = {
+                    IconButton(onClick = onSearchGameDatabase) {
+                        Icon(
+                            painterResource(R.drawable.ic_search),
+                            contentDescription = stringResource(R.string.action_search_game_database),
+                        )
+                    }
+                },
             )
             PlatformDropdownField(
                 selected = form.platform,

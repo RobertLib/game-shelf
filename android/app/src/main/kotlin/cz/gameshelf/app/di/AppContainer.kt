@@ -23,7 +23,9 @@ import cz.gameshelf.app.data.games.OfflineGamesRepository
 import cz.gameshelf.app.data.local.GameShelfDatabase
 import cz.gameshelf.app.data.local.LocalGameStore
 import cz.gameshelf.app.data.lookup.BarcodeLookupRepository
+import cz.gameshelf.app.data.lookup.GameSearchRepository
 import cz.gameshelf.app.data.lookup.RemoteBarcodeLookupRepository
+import cz.gameshelf.app.data.lookup.RemoteGameSearchRepository
 import cz.gameshelf.app.data.sync.ForegroundMonitor
 import cz.gameshelf.app.data.sync.NetworkMonitor
 import cz.gameshelf.app.data.sync.SyncController
@@ -101,8 +103,11 @@ class AppContainer(context: Context) {
         scope = appScope,
     )
 
-    val barcodeLookupRepository: BarcodeLookupRepository =
-        RemoteBarcodeLookupRepository(authenticatedRetrofit.create<LookupApi>())
+    private val lookupApi: LookupApi = authenticatedRetrofit.create()
+
+    val barcodeLookupRepository: BarcodeLookupRepository = RemoteBarcodeLookupRepository(lookupApi)
+
+    val gameSearchRepository: GameSearchRepository = RemoteGameSearchRepository(lookupApi)
 
     init {
         syncEngine.start()
