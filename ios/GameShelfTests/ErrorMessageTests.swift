@@ -14,6 +14,8 @@ struct ErrorMessageTests {
         (.invalidCurrentPassword, 400, "Current password is incorrect."),
         (.validationFailed, 400, "Please check the entered data."),
         (.tooManyRequests, 429, "Too many attempts. Please try again in a moment."),
+        (.lookupQuotaExceeded, 429, "You've reached today's limit of barcode lookups. Try again tomorrow."),
+        (.accountDeleted, 401, "This account has been deleted."),
         (.gameNotFound, 404, "Game not found."),
         (.internalError, 500, "Something went wrong. Please try again."),
         (.conflict, 409, "Something went wrong. Please try again."),
@@ -30,6 +32,12 @@ struct ErrorMessageTests {
 
     @Test func rateLimitWithoutKnownCodeUsesStatus() {
         #expect(ErrorMessage.message(for: serverError(429, .unknown)) == "Too many attempts. Please try again in a moment.")
+        #expect(ErrorMessage.message(for: APIError.http(statusCode: 429)) == "Too many attempts. Please try again in a moment.")
+    }
+
+    @Test func responsesWithoutAnAPIErrorBodyAreGeneric() {
+        #expect(ErrorMessage.message(for: APIError.http(statusCode: 404)) == "Something went wrong. Please try again.")
+        #expect(ErrorMessage.message(for: APIError.http(statusCode: 502)) == "Something went wrong. Please try again.")
     }
 
     @Test func networkFailures() {
@@ -51,10 +59,35 @@ struct ErrorMessageTests {
         #expect(ErrorMessage.message(for: APIError.invalidResponse) == "Something went wrong. Please try again.")
     }
 
+    @Test func theCodesOfADeletedAccountAndAUsedUpLookupQuotaAreKnown() throws {
+        let deleted = try JSONDecoder.api().decode(ErrorResponse.self, from: Fixtures.errorJSON(status: 401, code: "ACCOUNT_DELETED"))
+        #expect(deleted.code == .accountDeleted)
+        #expect(APIError.server(statusCode: 401, code: deleted.code, details: []).isAccountDeleted)
+        #expect(APIError.server(statusCode: 401, code: deleted.code, details: []).isEndOfSession)
+        #expect(!APIError.server(statusCode: 401, code: .unauthorized, details: []).isEndOfSession)
+        #expect(APIError.sessionExpired.isEndOfSession)
+        #expect(ErrorMessage.accountDeleted == "This account has been deleted.")
+        let quota = try JSONDecoder.api().decode(ErrorResponse.self, from: Fixtures.errorJSON(status: 429, code: "LOOKUP_QUOTA_EXCEEDED"))
+        #expect(quota.code == .lookupQuotaExceeded)
+    }
+
     @Test func unknownErrorCodeDecodesToFallback() throws {
         let body = try JSONDecoder.api().decode(ErrorResponse.self, from: Fixtures.errorJSON(status: 418, code: "BRAND_NEW_CODE"))
         #expect(body.code == .unknown)
         #expect(body.details == nil)
+    }
+
+    @Test func aStringCodeIsEnoughForAnAPIErrorBody() throws {
+        let body = try JSONDecoder.api().decode(ErrorResponse.self, from: Data(#"{"code":"GAME_NOT_FOUND","details":"x"}"#.utf8))
+        #expect(body.code == .gameNotFound)
+        #expect(body.details == nil)
+    }
+
+    @Test(arguments: [#"{"code":404}"#, #"{"code":null}"#, #"{"message":"Not Found"}"#, "<html>Not Found</html>", ""])
+    func bodiesWithoutAStringCodeAreNotAPIErrorBodies(_ body: String) {
+        #expect(throws: (any Error).self) {
+            try JSONDecoder.api().decode(ErrorResponse.self, from: Data(body.utf8))
+        }
     }
 
     @Test @MainActor func deleteAccountReportsAWrongPasswordAsIncorrectPassword() async {

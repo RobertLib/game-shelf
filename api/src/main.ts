@@ -21,15 +21,19 @@ async function bootstrap() {
     );
   }
 
-  SwaggerModule.setup('docs', app, createOpenApiDocument(app), {
-    jsonDocumentUrl: 'docs/openapi.json',
-    yamlDocumentUrl: 'docs/openapi.yaml',
-  });
+  const docs = config.get('SWAGGER_ENABLED', { infer: true });
+  if (docs) {
+    SwaggerModule.setup('docs', app, createOpenApiDocument(app), {
+      jsonDocumentUrl: 'docs/openapi.json',
+      yamlDocumentUrl: 'docs/openapi.yaml',
+    });
+  }
 
   const port = config.get('PORT', { infer: true });
   await app.listen(port);
   Logger.log(
-    `API on http://localhost:${port}/api/v1, docs on http://localhost:${port}/docs`,
+    `API on http://localhost:${port}/api/v1` +
+      (docs ? `, docs on http://localhost:${port}/docs` : ''),
   );
 }
 await bootstrap();

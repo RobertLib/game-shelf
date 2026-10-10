@@ -45,6 +45,12 @@ data class SaveGameRequest(
 ) {
     companion object {
         const val DEFAULT_CURRENCY = "CZK"
+
+        /**
+         * A purchase date is from 1900-01-01 to 2100-12-31 (mobile-spec.md, "Validation"); the date pickers offer
+         * only these years.
+         */
+        val PURCHASE_YEARS: IntRange = 1900..2100
     }
 }
 

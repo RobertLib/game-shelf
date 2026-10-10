@@ -16,6 +16,8 @@ final class GameRepository {
     private(set) var version = 0
     /// Whether the signed-in user's stored data has been loaded.
     private(set) var isLoaded = false
+    /// Why the signed-in user's stored data couldn't be loaded; "Try again" loads it again.
+    private(set) var loadError: String?
 
     @ObservationIgnored let status: SyncStatus
     @ObservationIgnored let store: GameStore
@@ -93,12 +95,28 @@ final class GameRepository {
         self.access = access
         apply(snapshot)
         isLoaded = true
+        loadError = nil
     }
 
-    /// Stops writing (sign-out, expired session). What is on screen stays until the next activation
-    /// replaces it, so the main flow doesn't flash empty while it goes away.
+    /// The signed-in user's stored data couldn't be opened; the list offers "Try again".
+    func failToLoad(_ message: String) {
+        loadError = message
+    }
+
+    /// Stops writing (sign-out, expired session, another user's activation) and forgets what is
+    /// shown, so nothing of the previous user appears while the next user's data loads – or if it
+    /// can't be loaded.
     func deactivate() {
         access = nil
+        isLoaded = false
+        loadError = nil
+        if !gamesByID.isEmpty {
+            gamesByID = [:]
+            version += 1
+        }
+        status.pendingCount = 0
+        status.lastSyncedAt = nil
+        status.hasUndoneRejectedChanges = false
     }
 
     /// Publishes the result of a write. Older snapshots than the one shown are ignored.
@@ -114,6 +132,24 @@ final class GameRepository {
         }
         if status.lastSyncedAt != snapshot.lastSyncedAt {
             status.lastSyncedAt = snapshot.lastSyncedAt
+        }
+        if status.hasUndoneRejectedChanges != snapshot.hasUndoneRejectedChanges {
+            status.hasUndoneRejectedChanges = snapshot.hasUndoneRejectedChanges
+        }
+    }
+
+    /// The user has seen "Some changes were rejected…": it is hidden at once and stored as seen.
+    @discardableResult
+    func acknowledgeUndoneRejectedChanges() -> Task<Void, Never>? {
+        status.hasUndoneRejectedChanges = false
+        guard let access else { return nil }
+        let store = store
+        return Task {
+            do {
+                apply(try await store.acknowledgeUndoneRejectedChanges(access: access))
+            } catch {
+                debugLog("Failed to store the seen rejection notice: \(error)")
+            }
         }
     }
 }

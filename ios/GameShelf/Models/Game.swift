@@ -1,18 +1,20 @@
 import Foundation
 
+/// A game as the API sends it. Its enum fields keep values this app version doesn't know verbatim
+/// (``Verbatim``), also in the stored copy.
 struct Game: Codable, Identifiable, Hashable, Sendable {
     typealias ID = String
 
     var id: ID
     var title: String
-    var platform: Platform
-    var status: CollectionStatus
-    var format: GameFormat
-    var region: Region?
+    @Verbatim var platform: Platform
+    @Verbatim var status: CollectionStatus
+    @Verbatim var format: GameFormat
+    @Verbatim var region: Region?
     var edition: String?
-    var completeness: Completeness?
-    var condition: Condition?
-    var playStatus: PlayStatus?
+    @Verbatim var completeness: Completeness?
+    @Verbatim var condition: Condition?
+    @Verbatim var playStatus: PlayStatus?
     var genre: String?
     var developer: String?
     var publisher: String?
@@ -46,6 +48,52 @@ struct GameChanges: Decodable, Hashable, Sendable {
     /// Opaque position to continue from.
     var cursor: String
     var hasMore: Bool
+    /// Ids of the games of the page that this app version couldn't decode (not part of the API's
+    /// response): they are skipped, but they are on the server.
+    var undecodableGameIds: [Game.ID] = []
+}
+
+extension GameChanges {
+    private enum CodingKeys: String, CodingKey {
+        case games, deletedIds, cursor, hasMore
+    }
+
+    /// A game this app version can't decode is skipped, so that the rest of the page and its cursor are
+    /// applied: one game never stops the device from receiving changes (docs/offline-sync.md, "Pull").
+    /// Its id is kept (``undecodableGameIds``) when it can be read.
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let games = try container.decode([PageGame].self, forKey: .games)
+        self.init(
+            games: games.compactMap(\.game),
+            deletedIds: try container.decode([Game.ID].self, forKey: .deletedIds),
+            cursor: try container.decode(String.self, forKey: .cursor),
+            hasMore: try container.decode(Bool.self, forKey: .hasMore),
+            undecodableGameIds: games.compactMap(\.undecodableID)
+        )
+    }
+
+    /// One game of a page: `game` is `nil` when this app version can't decode it, `undecodableID` is then
+    /// its id, if that can be read.
+    private struct PageGame: Decodable {
+        private enum CodingKeys: String, CodingKey {
+            case id
+        }
+
+        let game: Game?
+        let undecodableID: Game.ID?
+
+        init(from decoder: any Decoder) throws {
+            do {
+                game = try Game(from: decoder)
+                undecodableID = nil
+            } catch {
+                undecodableID = try? decoder.container(keyedBy: CodingKeys.self).decode(String.self, forKey: .id)
+                debugLog("Skipped game \(undecodableID ?? "without an id") of the change feed: \(error)")
+                game = nil
+            }
+        }
+    }
 }
 
 struct FacetValue: Hashable, Sendable {
@@ -84,7 +132,7 @@ struct GameFacets: Hashable, Sendable {
 // MARK: - Field-level changes
 
 extension Game {
-    /// A new game with the values of `request`.
+    /// A new game with the values of `request`, including the values it keeps verbatim.
     init(id: ID, values request: SaveGameRequest, createdAt: Date) {
         self.init(
             id: id, title: request.title, platform: request.platform, status: request.status, format: request.format,
@@ -98,22 +146,29 @@ extension Game {
             favorite: request.favorite, coverImageUrl: request.coverImageUrl, notes: request.notes,
             createdAt: createdAt, updatedAt: createdAt
         )
+        $platform = request.$platform
+        $status = request.$status
+        $format = request.$format
+        $region = request.$region
+        $completeness = request.$completeness
+        $condition = request.$condition
+        $playStatus = request.$playStatus
     }
 
-    /// Sets only `fields` to the values of `request`; every other value (including enum
-    /// values unknown to this app version) stays untouched.
+    /// Sets only `fields` to the values of `request` (an enum value with the string it keeps); every other
+    /// value (including enum values unknown to this app version) stays untouched.
     mutating func apply(_ fields: Set<GameField>, from request: SaveGameRequest) {
         for field in fields {
             switch field {
             case .title: title = request.title
-            case .platform: platform = request.platform
-            case .status: status = request.status
-            case .format: format = request.format
-            case .region: region = request.region
+            case .platform: $platform = request.$platform
+            case .status: $status = request.$status
+            case .format: $format = request.$format
+            case .region: $region = request.$region
             case .edition: edition = request.edition
-            case .completeness: completeness = request.completeness
-            case .condition: condition = request.condition
-            case .playStatus: playStatus = request.playStatus
+            case .completeness: $completeness = request.$completeness
+            case .condition: $condition = request.$condition
+            case .playStatus: $playStatus = request.$playStatus
             case .genre: genre = request.genre
             case .developer: developer = request.developer
             case .publisher: publisher = request.publisher
@@ -142,14 +197,14 @@ extension Game {
         for field in fields {
             switch field {
             case .title: merged.title = local.title
-            case .platform: merged.platform = local.platform
-            case .status: merged.status = local.status
-            case .format: merged.format = local.format
-            case .region: merged.region = local.region
+            case .platform: merged.$platform = local.$platform
+            case .status: merged.$status = local.$status
+            case .format: merged.$format = local.$format
+            case .region: merged.$region = local.$region
             case .edition: merged.edition = local.edition
-            case .completeness: merged.completeness = local.completeness
-            case .condition: merged.condition = local.condition
-            case .playStatus: merged.playStatus = local.playStatus
+            case .completeness: merged.$completeness = local.$completeness
+            case .condition: merged.$condition = local.$condition
+            case .playStatus: merged.$playStatus = local.$playStatus
             case .genre: merged.genre = local.genre
             case .developer: merged.developer = local.developer
             case .publisher: merged.publisher = local.publisher

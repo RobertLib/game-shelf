@@ -17,8 +17,10 @@ export class AuthResponseDto {
 
   @ApiProperty({
     description:
-      'Opaque single-use token for POST /auth/refresh. Every refresh returns a new one; ' +
-      'reusing an old token revokes all sessions of the user.',
+      'Opaque single-use token for POST /auth/refresh. Every refresh returns a new one. ' +
+      'Sending the previous token again shortly after (a retry when the response was lost) ' +
+      'returns a new pair as long as its replacement is unused; any other reuse of an old ' +
+      'token revokes all sessions of the user.',
   })
   refreshToken: string;
 

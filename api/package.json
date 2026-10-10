@@ -23,6 +23,7 @@
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
     "db:seed": "node dist/scripts/seed.js",
+    "db:reset-sync": "node dist/scripts/reset-sync.js",
     "openapi": "nest build && node dist/scripts/export-openapi.js ../openapi/openapi.yaml"
   },
   "dependencies": {
@@ -39,6 +40,7 @@
     "class-validator": "^0.15.1",
     "dotenv": "^18.0.6",
     "helmet": "^8.3.0",
+    "prisma": "^7.10.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },
@@ -54,12 +56,17 @@
     "oxlint": "^1.58.0",
     "oxlint-tsgolint": "^7.0.2001",
     "prettier": "^3.4.2",
-    "prisma": "^7.10.0",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",
     "typescript": "^6.0.2",
     "vitest": "^4.1.2",
     "yaml": "^2.9.1"
+  },
+  "overrides": {
+    "deepmerge-ts": "^8.0.2",
+    "mysql2": "^3.24.5",
+    "tmp": "^0.2.7",
+    "undici": "^6.29.0"
   },
   "engines": {
     "node": ">=24"

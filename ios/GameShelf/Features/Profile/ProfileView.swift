@@ -20,7 +20,7 @@ struct ProfileView: View {
                 Section("Account") {
                     LabeledContent("Email", value: user.email)
                     LabeledContent("Display name", value: user.displayName?.nilIfBlank ?? "Not set")
-                    LabeledContent("Member since", value: user.createdAt.formatted(date: .long, time: .omitted))
+                    LabeledContent("Member since", value: AppFormat.longDate(user.createdAt))
                 }
             }
 

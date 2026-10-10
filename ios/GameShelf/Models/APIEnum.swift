@@ -3,8 +3,8 @@ import Foundation
 /// A string-backed enum from the API contract.
 ///
 /// Values introduced by a newer API version decode into ``fallback`` instead of
-/// failing the whole response.
-protocol APIEnum: RawRepresentable, CaseIterable, Codable, Hashable, Sendable where RawValue == String, AllCases == [Self] {
+/// failing the whole response; a game's fields keep the string the API sent (``Verbatim``).
+protocol APIEnum: RawRepresentable, CaseIterable, VerbatimValue where RawValue == String, AllCases == [Self] {
     static var fallback: Self { get }
     /// Display name.
     var label: String { get }
@@ -21,6 +21,10 @@ extension APIEnum {
         try container.encode(rawValue)
     }
 
-    /// Whether this value is a placeholder for something this app version does not know.
+    /// Whether this app version knows the value; `false` for the placeholder of one it doesn't know.
     var isKnown: Bool { Self.allCases.contains(self) }
+
+    var wireString: String? { rawValue }
+
+    var isKnownValue: Bool { isKnown }
 }

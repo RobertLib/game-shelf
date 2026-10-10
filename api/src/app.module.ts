@@ -1,8 +1,14 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
-import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
+import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from './auth/auth.module.js';
+import { JwtAuthGuard } from './auth/jwt-auth.guard.js';
+import {
+  accountTracker,
+  AppThrottlerGuard,
+  hasAccountThrottle,
+} from './common/throttling.js';
 import { type Env, validateEnv } from './config/env.js';
 import { GamesModule } from './games/games.module.js';
 import { HealthController } from './health/health.controller.js';
@@ -18,10 +24,23 @@ import { PrismaModule } from './prisma/prisma.module.js';
     }),
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService<Env, true>) => ({
-        throttlers: [{ name: 'default', ttl: 60_000, limit: 300 }],
-        skipIf: () => !config.get('THROTTLE_ENABLED', { infer: true }),
-      }),
+      useFactory: (config: ConfigService<Env, true>) => {
+        const disabled = () => !config.get('THROTTLE_ENABLED', { infer: true });
+        return {
+          throttlers: [
+            // Per route, per signed-in user (or IP address); see AppThrottlerGuard.
+            { name: 'default', ttl: 60_000, limit: 300 },
+            {
+              name: 'account',
+              ttl: 15 * 60_000,
+              limit: 20,
+              getTracker: accountTracker,
+              skipIf: (context) => disabled() || !hasAccountThrottle(context),
+            },
+          ],
+          skipIf: disabled,
+        };
+      },
     }),
     PrismaModule,
     AuthModule,
@@ -29,6 +48,10 @@ import { PrismaModule } from './prisma/prisma.module.js';
     LookupModule,
   ],
   controllers: [HealthController],
-  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
+  // Global guards run in this order: the throttler counts per user, so it needs `req.user`.
+  providers: [
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: AppThrottlerGuard },
+  ],
 })
 export class AppModule {}

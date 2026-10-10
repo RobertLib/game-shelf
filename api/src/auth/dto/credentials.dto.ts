@@ -1,13 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import {
-  IsEmail,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { MaxChars, MinChars } from '../../common/char-length.decorator.js';
 import { TrimToNull } from '../../common/transforms.js';
 
 export const PASSWORD_MIN_LENGTH = 8;
@@ -20,25 +14,40 @@ const NormalizeEmail = () =>
 
 @ApiSchema({ name: 'LoginRequest' })
 export class LoginDto {
-  @ApiProperty({ format: 'email', example: 'collector@example.com' })
+  @ApiProperty({
+    maxLength: 254,
+    description:
+      'Not checked for format: an address of no account is answered `INVALID_CREDENTIALS` ' +
+      'like a wrong password.',
+    example: 'collector@example.com',
+  })
   @NormalizeEmail()
-  @IsEmail()
-  @MaxLength(254)
-  email: string;
-
-  @ApiProperty({ format: 'password', example: 'super-secret-123' })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(PASSWORD_MAX_LENGTH)
+  @MaxChars(254)
+  email: string;
+
+  @ApiProperty({
+    format: 'password',
+    maxLength: PASSWORD_MAX_LENGTH,
+    example: 'super-secret-123',
+  })
+  @IsString()
+  @IsNotEmpty()
+  @MaxChars(PASSWORD_MAX_LENGTH)
   password: string;
 }
 
 @ApiSchema({ name: 'RegisterRequest' })
 export class RegisterDto {
-  @ApiProperty({ format: 'email', example: 'collector@example.com' })
+  @ApiProperty({
+    format: 'email',
+    maxLength: 254,
+    example: 'collector@example.com',
+  })
   @NormalizeEmail()
   @IsEmail()
-  @MaxLength(254)
+  @MaxChars(254)
   email: string;
 
   @ApiProperty({
@@ -48,8 +57,8 @@ export class RegisterDto {
     example: 'super-secret-123',
   })
   @IsString()
-  @MinLength(PASSWORD_MIN_LENGTH)
-  @MaxLength(PASSWORD_MAX_LENGTH)
+  @MinChars(PASSWORD_MIN_LENGTH)
+  @MaxChars(PASSWORD_MAX_LENGTH)
   password: string;
 
   @ApiPropertyOptional({
@@ -61,25 +70,25 @@ export class RegisterDto {
   @TrimToNull()
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   displayName?: string | null;
 }
 
 @ApiSchema({ name: 'RefreshTokenRequest' })
 export class RefreshTokenDto {
-  @ApiProperty()
+  @ApiProperty({ maxLength: 200 })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(200)
+  @MaxChars(200)
   refreshToken: string;
 }
 
 @ApiSchema({ name: 'ChangePasswordRequest' })
 export class ChangePasswordDto {
-  @ApiProperty({ format: 'password' })
+  @ApiProperty({ format: 'password', maxLength: PASSWORD_MAX_LENGTH })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(PASSWORD_MAX_LENGTH)
+  @MaxChars(PASSWORD_MAX_LENGTH)
   currentPassword: string;
 
   @ApiProperty({
@@ -88,8 +97,8 @@ export class ChangePasswordDto {
     maxLength: PASSWORD_MAX_LENGTH,
   })
   @IsString()
-  @MinLength(PASSWORD_MIN_LENGTH)
-  @MaxLength(PASSWORD_MAX_LENGTH)
+  @MinChars(PASSWORD_MIN_LENGTH)
+  @MaxChars(PASSWORD_MAX_LENGTH)
   newPassword: string;
 }
 
@@ -97,10 +106,11 @@ export class ChangePasswordDto {
 export class DeleteAccountDto {
   @ApiProperty({
     format: 'password',
+    maxLength: PASSWORD_MAX_LENGTH,
     description: 'Current password as a confirmation.',
   })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(PASSWORD_MAX_LENGTH)
+  @MaxChars(PASSWORD_MAX_LENGTH)
   password: string;
 }

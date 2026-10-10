@@ -11,6 +11,9 @@ import cz.gameshelf.app.domain.model.GameSearchResult
 import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.appContainer
+import cz.gameshelf.app.ui.common.codePointLength
+import cz.gameshelf.app.ui.common.normalizedText
+import cz.gameshelf.app.ui.common.takeCodePoints
 import cz.gameshelf.app.ui.common.toUiText
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -34,7 +37,7 @@ data class GameSearchUiState(
 )
 
 sealed interface GameSearchContent {
-    /** Fewer than [GameSearchViewModel.MIN_QUERY_LENGTH] characters typed. */
+    /** Fewer than [GameSearchViewModel.MIN_QUERY_LENGTH] characters (code points) typed. */
     data object Hint : GameSearchContent
 
     /** Searching, with no results to show yet. */
@@ -59,6 +62,7 @@ sealed interface GameSearchEvent {
 /**
  * "Search game database" opened from the form: searches as the user types (debounced; a newer search
  * cancels an older one, so a late answer is ignored) and decides the platform of the picked game.
+ * The query is normalized and counted like every text sent to the API (mobile-spec.md, "Validation").
  */
 class GameSearchViewModel(
     private val repository: GameSearchRepository,
@@ -68,7 +72,7 @@ class GameSearchViewModel(
     private val debounceMillis: Long = SEARCH_DEBOUNCE_MILLIS,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(GameSearchUiState(query = initialQuery.trim()))
+    private val _uiState = MutableStateFlow(GameSearchUiState(query = initialQuery.normalizedText()))
     val uiState: StateFlow<GameSearchUiState> = _uiState.asStateFlow()
 
     private val _events = Channel<GameSearchEvent>(Channel.BUFFERED)
@@ -76,20 +80,20 @@ class GameSearchViewModel(
 
     private var searchJob: Job? = null
 
-    /** Trimmed query of the search waiting, running or shown; `null` while the hint is shown. */
+    /** Normalized query of the search waiting, running or shown; `null` while the hint is shown. */
     private var searchedQuery: String? = null
 
     init {
         // The title from the form is searched right away.
         val query = _uiState.value.query
-        if (query.length >= MIN_QUERY_LENGTH) search(query, delayMillis = 0)
+        if (query.codePointLength() >= MIN_QUERY_LENGTH) search(query, delayMillis = 0)
     }
 
     fun onQueryChange(value: String) {
         _uiState.update { it.copy(query = value) }
-        val query = value.trim()
+        val query = value.normalizedText()
         if (query == searchedQuery) return
-        if (query.length < MIN_QUERY_LENGTH) {
+        if (query.codePointLength() < MIN_QUERY_LENGTH) {
             searchJob?.cancel()
             searchedQuery = null
             _uiState.update { it.copy(content = GameSearchContent.Hint, isSearching = false) }
@@ -130,7 +134,7 @@ class GameSearchViewModel(
         }
         searchJob = viewModelScope.launch {
             delay(delayMillis)
-            val outcome = repository.search(query.take(MAX_QUERY_LENGTH).trimEnd(), formPlatform)
+            val outcome = repository.search(query.takeCodePoints(MAX_QUERY_LENGTH).normalizedText(), formPlatform)
             val content = when (outcome) {
                 is GameSearchOutcome.Found -> {
                     val games = outcome.response.items.distinctBy { it.igdbId }
@@ -155,7 +159,7 @@ class GameSearchViewModel(
         const val SEARCH_DEBOUNCE_MILLIS = 400L
         const val MIN_QUERY_LENGTH = 2
 
-        /** Longer text is cut for the request (the API accepts at most 100 characters). */
+        /** Longer text is cut for the request (the API accepts at most 100 code points). */
         const val MAX_QUERY_LENGTH = 100
 
         fun factory(initialQuery: String, formPlatform: Platform?): ViewModelProvider.Factory = viewModelFactory {

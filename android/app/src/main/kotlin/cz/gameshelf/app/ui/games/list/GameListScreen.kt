@@ -100,12 +100,18 @@ fun GameListRoute(
             is GameListEvent.ShowMessage -> scope.launch {
                 snackbarHostState.showSnackbar(event.message.resolve(resources))
             }
+            GameListEvent.ChangesRejected -> scope.launch {
+                viewModel.onChangesRejectedShown()
+                snackbarHostState.showSnackbar(resources.getString(R.string.error_changes_rejected))
+            }
             GameListEvent.ScrollToTop -> scope.launch { listState.scrollToItem(0) }
+            is GameListEvent.AddScannedGame -> onAddScannedGame(event.barcode)
         }
     }
 
     val scanBarcode = rememberBarcodeScanner(
-        onScanned = onAddScannedGame,
+        // Through the ViewModel, which outlives an activity recreated while the scanner is open.
+        onScanned = viewModel::onBarcodeScanned,
         onUnavailable = {
             scope.launch { snackbarHostState.showSnackbar(resources.getString(R.string.scanner_unavailable)) }
         },

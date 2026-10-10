@@ -19,6 +19,8 @@ struct StoreSnapshot: Sendable {
     var pendingCount: Int
     /// End of the last pull that reached the end of the change feed.
     var lastSyncedAt: Date?
+    /// Changes the server rejected were undone, and the user hasn't been told yet.
+    var hasUndoneRejectedChanges = false
 }
 
 /// A local change waiting to be pushed; at most one per game.
@@ -59,19 +61,40 @@ enum PushResult: Sendable {
     case deleted
     /// `404 GAME_NOT_FOUND`: the game was deleted on another device.
     case gameGone
-    /// Permanently rejected (`4xx`); for an `UPDATE` or `DELETE`, the server's current version of
-    /// the game (`nil` when it no longer exists).
-    case rejected(restored: Game?)
+    /// `PATCH` answered `404 GAME_UNKNOWN`: the server has no record of the game at all (it was restored
+    /// from a backup older than the game).
+    case gameUnknown
+    /// An `UPDATE` or `DELETE` permanently rejected with `error` (`400 VALIDATION_FAILED`, `409 CONFLICT`),
+    /// with the server's current version of the game (`nil` when it no longer exists). A rejected `CREATE`
+    /// is not undone: the game exists only on this device.
+    case rejected(APIError, restored: Game?)
+    /// An `UPDATE` or `DELETE` permanently rejected, whose game the server has no record of at all (the `GET`
+    /// of its undo answered `404 GAME_UNKNOWN`): there is nothing to restore, the local game is the only copy.
+    case rejectedUnknownGame
 }
 
 struct PushCompletion: Sendable {
     var snapshot: StoreSnapshot
-    /// The change became an `UPDATE` that has to be pushed in the same run.
+    /// The change became an `UPDATE` or a `CREATE` that has to be pushed in the same run.
     var pushAgain: Bool
+    /// A rejected change that was changed locally after it was sent, so it isn't undone: it stays queued as
+    /// a failure of this change (with the rejection) and is sent again in the next run.
+    var failure: APIError?
+}
+
+struct PullCompletion: Sendable {
+    var snapshot: StoreSnapshot
+    /// The last page of a full pull after a reset left games unconfirmed: they got a `CREATE`, which
+    /// another run pushes.
+    var queuedUnconfirmedGames: Bool
 }
 
 enum LocalStoreError: Error, Equatable {
     case gameNotFound
     /// The data no longer belongs to the user the write was made for.
     case accessRevoked
+    /// A pending `CREATE` or `UPDATE` refers to a game that is missing from the local store (or
+    /// can't be read). A local failure of that change: it is kept and tried again in later runs, the
+    /// other changes are pushed meanwhile, and it never counts as a deletion on the server.
+    case gameUnavailable
 }

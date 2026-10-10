@@ -29,6 +29,20 @@ struct FormattingTests {
         #expect(AppFormat.date(date, locale: english) == "May 17, 2024")
     }
 
+    @Test func textsMadeOfWordsAreInTheAppsLanguage() {
+        #expect(AppFormat.textLocale.language.languageCode == .english)
+        #expect(AppFormat.textLocale.region == Locale.current.region)
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(AppFormat.relativeTime(now.addingTimeInterval(-300), now: now) == "5 minutes ago")
+        #expect(AppFormat.longDate(Date(timeIntervalSince1970: 1_715_947_200), locale: english) == "May 17, 2024")
+    }
+
+    @Test func coverURLsAreLoadedOverHTTPS() {
+        #expect(URL(string: "http://example.com/a.png")!.upgradedToHTTPS.absoluteString == "https://example.com/a.png")
+        #expect(URL(string: "HTTP://Example.COM:8080/a.png?x=1")!.upgradedToHTTPS.absoluteString == "https://Example.COM:8080/a.png?x=1")
+        #expect(URL(string: "https://example.com/a.png")!.upgradedToHTTPS.absoluteString == "https://example.com/a.png")
+    }
+
     @Test func ranges() {
         #expect(AppFormat.range(from: "1990", to: "1999") == "1990–1999")
         #expect(AppFormat.range(from: "1990", to: nil) == "from 1990")

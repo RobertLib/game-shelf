@@ -74,6 +74,10 @@ struct LoginView: View {
         .background(Color(.systemGroupedBackground))
         .animation(.default, value: model.errorMessage)
         .toolbar(.hidden, for: .navigationBar)
+        .onDisappear {
+            // Why the app signed out is said until the user signs in or leaves the screen.
+            session.signOutNotice = nil
+        }
     }
 
     private func submit() {

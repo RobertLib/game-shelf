@@ -10,6 +10,8 @@ private const val HTTP_TOO_MANY_REQUESTS = 429
 fun AppError.toUiText(): UiText = when (this) {
     AppError.Network -> UiText(R.string.error_network)
     AppError.Unexpected -> UiText(R.string.error_unknown)
+    is AppError.Http ->
+        if (statusCode == HTTP_TOO_MANY_REQUESTS) UiText(R.string.error_too_many_requests) else UiText(R.string.error_unknown)
     is AppError.Api -> when {
         code == ErrorCode.INVALID_CREDENTIALS -> UiText(R.string.error_invalid_credentials)
         code == ErrorCode.EMAIL_ALREADY_REGISTERED -> UiText(R.string.error_email_already_registered)
@@ -17,8 +19,11 @@ fun AppError.toUiText(): UiText = when (this) {
         code == ErrorCode.VALIDATION_FAILED && details.isNotEmpty() ->
             UiText(R.string.error_validation_failed_details, details.joinToString(separator = "\n"))
         code == ErrorCode.VALIDATION_FAILED -> UiText(R.string.error_validation_failed)
+        // A 429 too, but not a matter of a moment.
+        code == ErrorCode.LOOKUP_QUOTA_EXCEEDED -> UiText(R.string.error_lookup_quota_exceeded)
         code == ErrorCode.TOO_MANY_REQUESTS || statusCode == HTTP_TOO_MANY_REQUESTS ->
             UiText(R.string.error_too_many_requests)
+        code == ErrorCode.ACCOUNT_DELETED -> UiText(R.string.error_account_deleted)
         code == ErrorCode.GAME_NOT_FOUND -> UiText(R.string.error_game_not_found)
         code == ErrorCode.LOOKUP_UNAVAILABLE -> UiText(R.string.error_lookup_unavailable)
         else -> UiText(R.string.error_unknown)

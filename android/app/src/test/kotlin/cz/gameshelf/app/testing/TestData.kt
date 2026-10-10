@@ -41,6 +41,11 @@ const val FULL_GAME_JSON = """
 }
 """
 
+/** [FULL_GAME_JSON] from a newer API: a platform and a status this app version doesn't know. */
+val GAME_WITH_UNKNOWN_VALUES_JSON = FULL_GAME_JSON
+    .replace("\"platform\": \"N64\"", "\"platform\": \"PLAYSTATION_6\"")
+    .replace("\"status\": \"OWNED\"", "\"status\": \"BORROWED\"")
+
 fun testGame(
     id: String,
     title: String = "Game $id",

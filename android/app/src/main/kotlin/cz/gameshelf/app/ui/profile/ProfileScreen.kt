@@ -1,6 +1,5 @@
 package cz.gameshelf.app.ui.profile
 
-import android.text.format.DateUtils
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -54,13 +53,13 @@ import cz.gameshelf.app.ui.common.Formatters
 import cz.gameshelf.app.ui.common.ObserveAsEvents
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.asString
+import cz.gameshelf.app.ui.common.relativeTime
 import cz.gameshelf.app.ui.common.resolve
 import cz.gameshelf.app.ui.components.NavigationIconButton
 import cz.gameshelf.app.ui.theme.GameShelfTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
 
@@ -286,7 +285,7 @@ private fun syncStatusText(status: SyncStatus): String = when {
     else -> stringResource(R.string.sync_not_synced_yet)
 }
 
-/** "5 minutes ago", refreshed while shown; "Never" before the first completed sync. */
+/** "5 minutes ago" (a date from a week on), refreshed while shown; "Never" before the first completed sync. */
 @Composable
 private fun lastSyncedText(lastSyncedAt: Instant?): String {
     val now by produceState(Instant.now(), lastSyncedAt) {
@@ -295,15 +294,9 @@ private fun lastSyncedText(lastSyncedAt: Instant?): String {
             delay(RELATIVE_TIME_REFRESH_MILLIS)
         }
     }
-    return when {
-        lastSyncedAt == null -> stringResource(R.string.sync_never)
-        Duration.between(lastSyncedAt, now) < Duration.ofMinutes(1) -> stringResource(R.string.sync_just_now)
-        else -> DateUtils.getRelativeTimeSpanString(
-            lastSyncedAt.toEpochMilli(),
-            now.toEpochMilli(),
-            DateUtils.MINUTE_IN_MILLIS,
-        ).toString()
-    }
+    if (lastSyncedAt == null) return stringResource(R.string.sync_never)
+    return relativeTime(lastSyncedAt, now)?.asString()
+        ?: Formatters.date(lastSyncedAt.atZone(ZoneId.systemDefault()).toLocalDate())
 }
 
 @Composable

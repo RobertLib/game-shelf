@@ -1,9 +1,13 @@
 package cz.gameshelf.app.data.sync
 
 import cz.gameshelf.app.data.api.ApiJson
+import cz.gameshelf.app.domain.model.CollectionStatus
+import cz.gameshelf.app.domain.model.Completeness
+import cz.gameshelf.app.domain.model.Condition
 import cz.gameshelf.app.domain.model.Game
+import cz.gameshelf.app.domain.model.GameFormat
+import cz.gameshelf.app.domain.model.PlayStatus
 import cz.gameshelf.app.domain.model.SaveGameRequest
-import cz.gameshelf.app.domain.model.toSaveRequest
 import kotlinx.serialization.descriptors.elementNames
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -12,7 +16,8 @@ import kotlinx.serialization.json.jsonObject
 
 /**
  * Field-level operations on games in their JSON shape (the property names of `SaveGameRequest`),
- * so that every field is handled the same way – including enum values unknown to this app version.
+ * so that every field is handled the same way – including enum values unknown to this app version, which the
+ * JSON shape keeps verbatim (offline-sync.md, "Local data").
  */
 object GameFields {
 
@@ -36,15 +41,40 @@ object GameFields {
         return if (local.updatedAt > merged.updatedAt) merged.copy(updatedAt = local.updatedAt) else merged
     }
 
-    /** `PATCH games/{id}` body: [fields] of [game], cleared optional fields as explicit `null`. */
-    fun patchBody(game: Game, fields: Set<String>): JsonObject {
-        val request = game.toSaveRequest().toJson()
-        return JsonObject(request.filterKeys { it in fields })
-    }
+    /**
+     * `PATCH games/{id}` body: [fields] of [game], cleared optional fields as explicit `null`. Only the fields the
+     * user changed are listed, so a value this app version doesn't know is never sent back unless the user replaced
+     * it (offline-sync.md, "Local changes").
+     */
+    fun patchBody(game: Game, fields: Set<String>): JsonObject =
+        JsonObject(game.sendableValues().filterKeys { it in fields })
 
-    /** `POST games` body: every field of [game] plus its client-generated id. */
+    /**
+     * `POST games` body: every field of [game] plus its client-generated id. A value this app version doesn't know is
+     * sent as the API sent it, so pushing a game back to a server that lost it doesn't replace it with a default.
+     */
     fun createBody(game: Game): JsonObject =
-        JsonObject(mapOf("id" to JsonPrimitive(game.id)) + game.toSaveRequest().toJson())
+        JsonObject(mapOf("id" to JsonPrimitive(game.id)) + game.sendableValues())
+
+    /**
+     * The fields of [this] game as a request. A value this app version doesn't know is the one the API sent, verbatim
+     * (see [cz.gameshelf.app.domain.model.GameSerializer]). A fallback `UNKNOWN` without that value – stored by an
+     * older app version, which didn't keep it – is left out: the API would reject it, and the server has the real
+     * value anyway (the full pull after the update brings it).
+     */
+    private fun Game.sendableValues(): JsonObject {
+        val withoutValue = buildSet {
+            fun check(name: String, isFallback: Boolean) {
+                if (isFallback && name !in unknownEnumValues) add(name)
+            }
+            check(SaveGameRequest::status.name, status == CollectionStatus.UNKNOWN)
+            check(SaveGameRequest::format.name, format == GameFormat.UNKNOWN)
+            check(SaveGameRequest::completeness.name, completeness == Completeness.UNKNOWN)
+            check(SaveGameRequest::condition.name, condition == Condition.UNKNOWN)
+            check(SaveGameRequest::playStatus.name, playStatus == PlayStatus.UNKNOWN)
+        }
+        return JsonObject(toJson().filterKeys { it in ALL && it !in withoutValue })
+    }
 
     private fun Game.withFields(source: JsonObject, fields: Set<String>): Game {
         val json = toJson()

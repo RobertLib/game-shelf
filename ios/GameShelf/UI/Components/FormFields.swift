@@ -117,11 +117,12 @@ struct SuggestingTextField: View {
     }
 }
 
-/// Date that can be left empty: a toggle reveals the picker.
+/// Date that can be left empty: a toggle reveals the picker, with its inline validation message.
 struct OptionalDatePicker: View {
     let title: String
     @Binding var date: Date?
     var range: ClosedRange<Date>?
+    var error: String?
     var defaultDate: Date = .now
 
     var body: some View {
@@ -131,16 +132,19 @@ struct OptionalDatePicker: View {
         ))
         if let current = date {
             let binding = Binding<Date>(get: { current }, set: { date = $0 })
-            Group {
-                if let range {
-                    DatePicker(title, selection: binding, in: range, displayedComponents: .date)
-                } else {
-                    DatePicker(title, selection: binding, displayedComponents: .date)
+            VStack(alignment: .leading, spacing: 6) {
+                Group {
+                    if let range {
+                        DatePicker(title, selection: binding, in: range, displayedComponents: .date)
+                    } else {
+                        DatePicker(title, selection: binding, displayedComponents: .date)
+                    }
                 }
+                .labelsHidden()
+                .datePickerStyle(.compact)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                FieldError(message: error)
             }
-            .labelsHidden()
-            .datePickerStyle(.compact)
-            .frame(maxWidth: .infinity, alignment: .trailing)
         }
     }
 }

@@ -81,6 +81,82 @@ struct GameDecodingTests {
         #expect(!CollectionStatus.allCases.contains(.unknown))
     }
 
+    @Test func unknownEnumValuesAreKeptVerbatimThroughTheStoredCopy() throws {
+        let game = try decodeGame(Fixtures.unknownValuesGameJSON)
+        // Shown as the fallback …
+        #expect(game.platform == .other)
+        #expect(game.region == .other)
+        #expect(game.status == .unknown)
+        // … but kept as the API sent it.
+        #expect(game.unknownWireValues == Fixtures.unknownWireValues)
+
+        // The local database stores games with the API coders.
+        let stored = try JSONEncoder.api().encode(game)
+        let json = stored.jsonObject
+        for (field, value) in Fixtures.unknownWireValues {
+            #expect(json[field.rawValue] as? String == value)
+        }
+        let restored = try decoder.decode(Game.self, from: stored)
+        #expect(restored == game)
+        #expect(restored.unknownWireValues == Fixtures.unknownWireValues)
+    }
+
+    @Test func knownValuesAndThePlaceholdersOfOlderVersionsKeepNoString() throws {
+        let known = try decodeGame(Fixtures.gameJSON)
+        #expect(known.unknownWireValues.isEmpty)
+        // "OTHER" is a value of the API; "UNKNOWN" is what app versions before stored for one they didn't know.
+        let json = Fixtures.gameJSON
+            .replacingOccurrences(of: "\"N64\"", with: "\"OTHER\"")
+            .replacingOccurrences(of: "\"OWNED\"", with: "\"UNKNOWN\"")
+        let game = try decodeGame(json)
+        #expect(game.platform == .other)
+        #expect(game.status == .unknown)
+        #expect(game.unknownWireValues.isEmpty)
+    }
+
+    @Test func missingOptionalEnumFieldsAreEmpty() throws {
+        var object = try #require(try JSONSerialization.jsonObject(with: Data(Fixtures.gameJSON.utf8)) as? [String: Any])
+        for key in ["region", "completeness", "condition", "playStatus"] {
+            object[key] = nil
+        }
+        let game = try decoder.decode(Game.self, from: JSONSerialization.data(withJSONObject: object))
+        #expect(game.region == nil)
+        #expect(game.completeness == nil)
+        #expect(game.condition == nil)
+        #expect(game.playStatus == nil)
+        // A required one can't be missing.
+        object["status"] = nil
+        #expect(throws: DecodingError.self) {
+            try decoder.decode(Game.self, from: JSONSerialization.data(withJSONObject: object))
+        }
+    }
+
+    @Test func aGameOfAPageThatCantBeDecodedIsSkipped() throws {
+        let unreadable = Fixtures.gameJSON
+            .replacingOccurrences(of: "01a1163b-0cb1-75e9-bd4e-4a7feec69237", with: "01a1163b-0cb1-75e9-bd4e-4a7feec69239")
+            .replacingOccurrences(of: "\"2024-05-17\"", with: "\"17.5.2024\"")
+        let json = Data("""
+        {
+          "games": [\(unreadable), \(Fixtures.gameJSON), {"id": "01a1163b-0cb1-75e9-bd4e-4a7feec6923a"}, 42],
+          "deletedIds": ["01a1163b-0cb1-75e9-bd4e-4a7feec69238"],
+          "cursor": "5f1d3c9a2b.42",
+          "hasMore": true
+        }
+        """.utf8)
+        let page = try decoder.decode(GameChanges.self, from: json)
+        #expect(page.games == [try Fixtures.decodedGame])
+        // On the server all the same: their ids are kept (a value without an id can't be).
+        #expect(page.undecodableGameIds == ["01a1163b-0cb1-75e9-bd4e-4a7feec69239", "01a1163b-0cb1-75e9-bd4e-4a7feec6923a"])
+        #expect(page.deletedIds == ["01a1163b-0cb1-75e9-bd4e-4a7feec69238"])
+        #expect(page.cursor == "5f1d3c9a2b.42")
+        #expect(page.hasMore)
+    }
+
+    @Test func aPageWithoutItsCursorIsNotAPage() {
+        let json = Data(#"{"games": [], "deletedIds": [], "hasMore": false}"#.utf8)
+        #expect(throws: DecodingError.self) { try decoder.decode(GameChanges.self, from: json) }
+    }
+
     @Test func decodesChangesFeedPage() throws {
         let page = try decoder.decode(GameChanges.self, from: Fixtures.changesJSON)
         #expect(page.games.map(\.title) == ["The Legend of Zelda: Ocarina of Time"])

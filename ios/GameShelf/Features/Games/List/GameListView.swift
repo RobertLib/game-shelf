@@ -10,7 +10,9 @@ struct GameListView: View {
 
     var body: some View {
         List {
-            if !model.games.isEmpty {
+            // Also over an empty list (no results, or the last game deleted while offline), so the sync
+            // status stays visible.
+            if !model.games.isEmpty || model.phase == .loaded {
                 if let sections = model.sections {
                     Section {
                     } header: {

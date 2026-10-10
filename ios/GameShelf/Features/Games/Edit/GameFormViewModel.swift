@@ -59,8 +59,9 @@ final class GameFormViewModel {
 
     var hasChanges: Bool { draft != initialDraft }
 
+    /// Values the form started with are not validated: they came from the server.
     var errors: [GameDraft.Field: String] {
-        draft.errors(includingRequired: hasAttemptedSave)
+        draft.errors(includingRequired: hasAttemptedSave, initial: initialDraft)
     }
 
     /// Looks up the barcode the form was opened with, the first time only.
@@ -143,7 +144,7 @@ final class GameFormViewModel {
     /// Returns `true` when the form can close.
     func save() async -> Bool {
         hasAttemptedSave = true
-        guard !isSaving, let request = draft.makeRequest() else { return false }
+        guard !isSaving, let request = draft.makeRequest(initial: initialDraft) else { return false }
         isSaving = true
         defer { isSaving = false }
         do {

@@ -16,9 +16,40 @@ const codeByStatus: Partial<Record<number, ErrorCode>> = {
   [HttpStatus.UNAUTHORIZED]: ErrorCode.UNAUTHORIZED,
   [HttpStatus.FORBIDDEN]: ErrorCode.FORBIDDEN,
   [HttpStatus.NOT_FOUND]: ErrorCode.NOT_FOUND,
+  [HttpStatus.METHOD_NOT_ALLOWED]: ErrorCode.NOT_FOUND,
   [HttpStatus.CONFLICT]: ErrorCode.CONFLICT,
+  [HttpStatus.PAYLOAD_TOO_LARGE]: ErrorCode.VALIDATION_FAILED,
+  [HttpStatus.UNSUPPORTED_MEDIA_TYPE]: ErrorCode.VALIDATION_FAILED,
+  [HttpStatus.UNPROCESSABLE_ENTITY]: ErrorCode.VALIDATION_FAILED,
   [HttpStatus.TOO_MANY_REQUESTS]: ErrorCode.TOO_MANY_REQUESTS,
 };
+
+/** The code of an HTTP error that has none of its own: any other 4xx is a bad request. */
+function codeForStatus(status: number): ErrorCode {
+  if (status >= 400 && status < 500) {
+    return codeByStatus[status] ?? ErrorCode.BAD_REQUEST;
+  }
+  return ErrorCode.INTERNAL_ERROR;
+}
+
+/**
+ * Status of a client error raised by Express middleware rather than Nest, e.g.
+ * body-parser's 413 (body too large) or 415 (unsupported charset). These are
+ * `http-errors` objects whose `expose` flag says the message is safe to show.
+ */
+function middlewareClientErrorStatus(exception: unknown): number | null {
+  if (!(exception instanceof Error)) return null;
+  const { status, expose } = exception as Error & {
+    status?: unknown;
+    expose?: unknown;
+  };
+  return expose === true &&
+    typeof status === 'number' &&
+    status >= 400 &&
+    status < 500
+    ? status
+    : null;
+}
 
 /** Renders every error as {@link ErrorResponseDto}. */
 @Catch()
@@ -45,8 +76,17 @@ export class HttpExceptionFilter implements ExceptionFilter {
       const statusCode = exception.getStatus();
       return {
         statusCode,
-        code: codeByStatus[statusCode] ?? ErrorCode.INTERNAL_ERROR,
+        code: codeForStatus(statusCode),
         message: exception.message,
+      };
+    }
+
+    const statusCode = middlewareClientErrorStatus(exception);
+    if (statusCode) {
+      return {
+        statusCode,
+        code: codeForStatus(statusCode),
+        message: (exception as Error).message,
       };
     }
 

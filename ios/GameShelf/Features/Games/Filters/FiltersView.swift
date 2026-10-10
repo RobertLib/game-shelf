@@ -182,8 +182,8 @@ struct FiltersView: View {
         }
 
         Section {
-            OptionalDatePicker(title: "From", date: $draft.purchaseDateFrom)
-            OptionalDatePicker(title: "To", date: $draft.purchaseDateTo)
+            OptionalDatePicker(title: "From", date: $draft.purchaseDateFrom, range: Validation.purchaseDatePickerRange)
+            OptionalDatePicker(title: "To", date: $draft.purchaseDateTo, range: Validation.purchaseDatePickerRange)
             FieldError(message: errors[.purchaseDate])
         } header: {
             Text("Purchase date")

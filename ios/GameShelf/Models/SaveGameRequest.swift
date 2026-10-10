@@ -3,17 +3,18 @@ import Foundation
 /// The editable fields of a game, as sent to the API.
 ///
 /// `POST games` sends every field (empty optionals as explicit JSON `null`); `PATCH games/{id}`
-/// sends only the changed ones (see ``UpdateGameRequest``).
+/// sends only the changed ones (see ``UpdateGameRequest``). Enum values this app version doesn't know
+/// are sent as the API sent them (``Verbatim``).
 struct SaveGameRequest: Encodable, Hashable, Sendable {
     var title: String
-    var platform: Platform
-    var status: CollectionStatus = .owned
-    var format: GameFormat = .physical
-    var region: Region?
+    @Verbatim var platform: Platform
+    @Verbatim var status: CollectionStatus = .owned
+    @Verbatim var format: GameFormat = .physical
+    @Verbatim var region: Region? = nil
     var edition: String?
-    var completeness: Completeness?
-    var condition: Condition?
-    var playStatus: PlayStatus?
+    @Verbatim var completeness: Completeness? = nil
+    @Verbatim var condition: Condition? = nil
+    @Verbatim var playStatus: PlayStatus? = nil
     var genre: String?
     var developer: String?
     var publisher: String?
@@ -55,14 +56,15 @@ struct SaveGameRequest: Encodable, Hashable, Sendable {
     private func encode(_ field: Field, into container: inout KeyedEncodingContainer<Field>) throws {
         switch field {
         case .title: try container.encode(title, forKey: field)
-        case .platform: try container.encode(platform, forKey: field)
-        case .status: try container.encode(status, forKey: field)
-        case .format: try container.encode(format, forKey: field)
-        case .region: try container.encodeExplicitly(region, forKey: field)
+        // The enum fields encode an empty value as `null` themselves.
+        case .platform: try container.encode($platform, forKey: field)
+        case .status: try container.encode($status, forKey: field)
+        case .format: try container.encode($format, forKey: field)
+        case .region: try container.encode($region, forKey: field)
         case .edition: try container.encodeExplicitly(edition, forKey: field)
-        case .completeness: try container.encodeExplicitly(completeness, forKey: field)
-        case .condition: try container.encodeExplicitly(condition, forKey: field)
-        case .playStatus: try container.encodeExplicitly(playStatus, forKey: field)
+        case .completeness: try container.encode($completeness, forKey: field)
+        case .condition: try container.encode($condition, forKey: field)
+        case .playStatus: try container.encode($playStatus, forKey: field)
         case .genre: try container.encodeExplicitly(genre, forKey: field)
         case .developer: try container.encodeExplicitly(developer, forKey: field)
         case .publisher: try container.encodeExplicitly(publisher, forKey: field)
@@ -95,7 +97,8 @@ typealias GameField = SaveGameRequest.Field
 // MARK: - Field-level changes
 
 extension SaveGameRequest {
-    /// Fields whose value differs from `original`. Money is compared at the precision the API stores.
+    /// Fields whose value differs from `original`. Money is compared at the precision the API stores; an
+    /// enum value this app version doesn't know differs from every value the user can pick.
     func changedFields(comparedTo original: SaveGameRequest) -> Set<Field> {
         Set(Field.allCases.filter { !hasSameValue(in: $0, as: original) })
     }
@@ -103,14 +106,14 @@ extension SaveGameRequest {
     private func hasSameValue(in field: Field, as other: SaveGameRequest) -> Bool {
         switch field {
         case .title: title == other.title
-        case .platform: platform == other.platform
-        case .status: status == other.status
-        case .format: format == other.format
-        case .region: region == other.region
+        case .platform: $platform == other.$platform
+        case .status: $status == other.$status
+        case .format: $format == other.$format
+        case .region: $region == other.$region
         case .edition: edition == other.edition
-        case .completeness: completeness == other.completeness
-        case .condition: condition == other.condition
-        case .playStatus: playStatus == other.playStatus
+        case .completeness: $completeness == other.$completeness
+        case .condition: $condition == other.$condition
+        case .playStatus: $playStatus == other.$playStatus
         case .genre: genre == other.genre
         case .developer: developer == other.developer
         case .publisher: publisher == other.publisher
@@ -133,22 +136,17 @@ extension SaveGameRequest {
 }
 
 extension SaveGameRequest {
-    /// A full copy of an existing game, e.g. as the starting point of an edit.
+    /// A full copy of an existing game, e.g. as the starting point of an edit, or the body of a `CREATE`.
     ///
-    /// Enum values unknown to this app version cannot be sent back, so they fall
-    /// back to the API defaults (or `null` for optional fields). Because edits are
-    /// compared with a copy built the same way, such untouched values are never sent.
+    /// Enum values unknown to this app version are kept as the API sent them (``Verbatim``), so a `CREATE`
+    /// sends them unchanged; because edits are compared with a copy built the same way, untouched ones are
+    /// never sent in a `PATCH`. Only a placeholder without the API's string (stored by an older app version)
+    /// falls back to the API default (or `null` for optional fields), as that version sent it.
     init(game: Game) {
         self.init(
             title: game.title,
             platform: game.platform,
-            status: game.status.isKnown ? game.status : .owned,
-            format: game.format.isKnown ? game.format : .physical,
-            region: game.region,
             edition: game.edition,
-            completeness: game.completeness.flatMap { $0.isKnown ? $0 : nil },
-            condition: game.condition.flatMap { $0.isKnown ? $0 : nil },
-            playStatus: game.playStatus.flatMap { $0.isKnown ? $0 : nil },
             genre: game.genre,
             developer: game.developer,
             publisher: game.publisher,
@@ -167,6 +165,13 @@ extension SaveGameRequest {
             coverImageUrl: game.coverImageUrl,
             notes: game.notes
         )
+        $platform = game.$platform
+        $status = game.$status.replacingPlaceholder(with: .owned)
+        $format = game.$format.replacingPlaceholder(with: .physical)
+        $region = game.$region
+        $completeness = game.$completeness.replacingPlaceholder(with: nil)
+        $condition = game.$condition.replacingPlaceholder(with: nil)
+        $playStatus = game.$playStatus.replacingPlaceholder(with: nil)
     }
 }
 

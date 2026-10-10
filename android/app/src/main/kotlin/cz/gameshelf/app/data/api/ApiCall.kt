@@ -31,12 +31,16 @@ suspend fun <T> apiCall(json: Json = ApiJson, block: suspend () -> T): ApiResult
         ApiResult.Failure(AppError.Unexpected)
     }
 
-fun HttpException.toAppError(json: Json = ApiJson): AppError.Api {
+/**
+ * [AppError.Api] for a response with an API error body – JSON with a string `code`, which may be one this app
+ * version doesn't know ([ErrorCode.UNKNOWN]); [AppError.Http] for any other body (or none).
+ */
+fun HttpException.toAppError(json: Json = ApiJson): AppError {
     val body = runCatching { response()?.errorBody()?.string() }.getOrNull()
-    val error = body?.let { runCatching { json.decodeFromString<ErrorResponse>(it) }.getOrNull() }
-    return AppError.Api(
-        statusCode = code(),
-        code = error?.code ?: ErrorCode.UNKNOWN,
-        details = error?.details.orEmpty(),
-    )
+    val error = parseApiError(body, json) ?: return AppError.Http(code())
+    return AppError.Api(statusCode = code(), code = error.code, details = error.details.orEmpty())
 }
+
+/** The API error body in [body] – JSON with a string `code` – or `null` for any other body (or none). */
+internal fun parseApiError(body: String?, json: Json = ApiJson): ErrorResponse? =
+    body?.let { runCatching { json.decodeFromString<ErrorResponse>(it) }.getOrNull() }

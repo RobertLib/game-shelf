@@ -2,7 +2,9 @@ import SwiftUI
 
 struct GameDetailView: View {
     @State private var model: GameDetailViewModel
-    @State private var isEditing = false
+    /// The game as it was when editing began. The form is presented outside the game's content, so it
+    /// stays open with the user's input when a sync deletes the game meanwhile.
+    @State private var editedGame: Game?
     @State private var isConfirmingDelete = false
     @Environment(\.dismiss) private var dismiss
 
@@ -28,6 +30,9 @@ struct GameDetailView: View {
             actions: { Button("OK", role: .cancel) {} },
             message: { Text(model.errorMessage ?? "") }
         )
+        .sheet(item: $editedGame) { game in
+            GameFormView(mode: .edit(game), repository: model.repository)
+        }
     }
 
     private func content(_ game: Game) -> some View {
@@ -69,13 +74,10 @@ struct GameDetailView: View {
         } message: {
             Text("“\(game.title)” will be permanently removed from your collection.")
         }
-        .sheet(isPresented: $isEditing) {
-            GameFormView(mode: .edit(game), repository: model.repository)
-        }
         #if DEBUG
         .task {
             if DebugLaunchOptions.current.consume(.edit) {
-                isEditing = true
+                editedGame = game
             }
         }
         #endif
@@ -96,7 +98,7 @@ struct GameDetailView: View {
             .sensoryFeedback(.selection, trigger: game.favorite)
 
             Button("Edit") {
-                isEditing = true
+                editedGame = game
             }
         }
     }

@@ -2,9 +2,11 @@ package cz.gameshelf.app.testing
 
 import cz.gameshelf.app.data.games.GameChange
 import cz.gameshelf.app.data.games.GamesRepository
+import cz.gameshelf.app.data.sync.GameFields
 import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.domain.model.SaveGameRequest
 import cz.gameshelf.app.domain.model.toNewGame
+import cz.gameshelf.app.domain.model.toSaveRequest
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,9 +37,10 @@ class FakeGamesRepository(initial: List<Game>? = emptyList()) : GamesRepository 
         return game
     }
 
+    /** Like the real one: saves the fields of [request] that differ from [base] (default: the stored game). */
     override suspend fun updateGame(id: String, request: SaveGameRequest, base: SaveGameRequest?): Game? {
         val game = game(id) ?: return null
-        val updated = request.toNewGame(id, game.createdAt)
+        val updated = GameFields.apply(game, request, GameFields.diff(base ?: game.toSaveRequest(), request))
         stored.update { games -> games?.map { if (it.id == id) updated else it } }
         changes.emit(GameChange.Updated(updated))
         return updated

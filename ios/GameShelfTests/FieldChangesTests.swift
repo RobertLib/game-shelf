@@ -55,6 +55,39 @@ struct FieldChangesTests {
         #expect(game.condition == .unknown)
     }
 
+    @Test func unknownEnumValuesAreComparedVerbatim() throws {
+        let game = try Fixtures.gameWithUnknownValues()
+        let original = SaveGameRequest(game: game)
+        #expect(original.status == .unknown)
+        #expect(original.unknownWireValues == Fixtures.unknownWireValues)
+
+        // Untouched – also when the value shown is set again – they are no change.
+        var edited = original
+        edited.notes = "Edited"
+        edited.status = .unknown
+        edited.platform = .other
+        edited.region = .other
+        #expect(edited.changedFields(comparedTo: original) == [.notes])
+
+        // Picking a known value is a change, also the one the API would default to.
+        edited.status = .owned
+        edited.completeness = nil
+        #expect(edited.changedFields(comparedTo: original) == [.notes, .status, .completeness])
+        #expect(edited.$status.unknownWireValue == nil)
+    }
+
+    @Test func applyingAndMergingCarryTheStringsOfUnknownValues() throws {
+        let remote = try Fixtures.gameWithUnknownValues()
+        var local = Fixtures.game("Local", id: remote.id)
+        local.apply(Set(GameField.allCases), from: SaveGameRequest(game: remote))
+        #expect(local.unknownWireValues == Fixtures.unknownWireValues)
+
+        let server = Fixtures.game("Server", id: remote.id)
+        let merged = server.merging([.platform, .status], from: remote)
+        #expect(merged.unknownWireValues == [.platform: "PLAYDATE", .status: "BORROWED_FROM_LIBRARY"])
+        #expect(Game(id: "new", values: SaveGameRequest(game: remote), createdAt: .now).unknownWireValues == Fixtures.unknownWireValues)
+    }
+
     @Test func mergingTakesOnlyTheGivenFieldsFromTheLocalGame() throws {
         let server = try Fixtures.decodedGame
         var local = server
@@ -93,6 +126,41 @@ struct FieldChangesTests {
     @Test func emptyPatchBodyIsAnEmptyObject() throws {
         let values = SaveGameRequest(title: "Zelda", platform: .n64)
         #expect(try text(UpdateGameRequest(values: values, fields: [])) == "{}")
+    }
+
+    @Test func createBodySendsUnknownEnumValuesUnchanged() throws {
+        let game = try Fixtures.gameWithUnknownValues()
+        let body = try json(CreateGameRequest(id: game.id, values: SaveGameRequest(game: game)))
+        #expect(body.count == 27)
+        for (field, value) in Fixtures.unknownWireValues {
+            #expect(body[field.rawValue] as? String == value, "\(field)")
+        }
+    }
+
+    @Test func createBodySendsThePlaceholdersOfOlderVersionsAsTheDefaults() throws {
+        let game = Fixtures.game("Stored by an older version") {
+            $0.status = .unknown
+            $0.format = .unknown
+            $0.condition = .unknown
+        }
+        let body = try json(CreateGameRequest(id: game.id, values: SaveGameRequest(game: game)))
+        #expect(body["status"] as? String == "OWNED")
+        #expect(body["format"] as? String == "PHYSICAL")
+        #expect(body["condition"] is NSNull)
+    }
+
+    @Test func patchBodyNeverSendsAnUntouchedUnknownValue() throws {
+        let original = SaveGameRequest(game: try Fixtures.gameWithUnknownValues())
+        var edited = original
+        edited.rating = 7
+        let fields = edited.changedFields(comparedTo: original)
+        #expect(try text(UpdateGameRequest(values: edited, fields: fields)) == #"{"rating":7}"#)
+
+        // A value picked for an unknown one is sent; the other unknown values are not.
+        edited.status = .owned
+        edited.region = nil
+        let picked = edited.changedFields(comparedTo: original)
+        #expect(try text(UpdateGameRequest(values: edited, fields: picked)) == #"{"rating":7,"region":null,"status":"OWNED"}"#)
     }
 
     @Test func createBodyHasTheIdAndEveryField() throws {

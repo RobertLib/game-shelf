@@ -213,6 +213,32 @@ class GameSearchViewModelTest {
     }
 
     @Test
+    fun `the query is counted and cut in code points, never inside a surrogate pair`() = runTest {
+        // One emoji is 2 UTF-16 chars but 1 code point: too short.
+        viewModel("😀")
+        advanceUntilIdle()
+        assertTrue(repository.searches.isEmpty())
+
+        viewModel("😀".repeat(2))
+        advanceUntilIdle()
+        assertEquals("😀".repeat(2), repository.searches.single().query)
+
+        viewModel("x" + "😀".repeat(150))
+        advanceUntilIdle()
+        assertEquals("x" + "😀".repeat(GameSearchViewModel.MAX_QUERY_LENGTH - 1), repository.searches.last().query)
+    }
+
+    @Test
+    fun `the query is normalized like every text sent to the API`() = runTest {
+        val viewModel = viewModel("\uFEFFmario\u0000 kart\n")
+        advanceUntilIdle()
+
+        assertEquals("mario kart", repository.searches.single().query)
+        viewModel.onQueryChange("\uFEFF m\u0000 ")
+        assertEquals(GameSearchContent.Hint, viewModel.content)
+    }
+
+    @Test
     fun `picking a game on one platform fills in that platform`() = runTest {
         val viewModel = viewModel("mario kart")
         advanceUntilIdle()

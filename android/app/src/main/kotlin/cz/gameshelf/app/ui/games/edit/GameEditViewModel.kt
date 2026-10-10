@@ -30,15 +30,22 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
 
 data class GameEditUiState(
     val isEditing: Boolean,
+    /** What the user entered; with [initialForm], it survives process death (see [GameEditViewModel]). */
     val form: GameForm = GameForm(),
+    /** The form as it was opened (or last saved): the base of change detection and "Discard changes?". */
     val initialForm: GameForm = form,
     val errors: Map<GameField, UiText> = emptyMap(),
     val isLoading: Boolean = false,
@@ -95,9 +102,12 @@ sealed interface GameEditEvent {
  * A scanned barcode is looked up in the game databases behind the API, which needs a connection; what
  * they know fills the fields that are still empty. A game picked in the database search (see
  * [GameSearchPick]) replaces the fields it knows instead.
+ *
+ * The form and the state it started from are kept in the [SavedStateHandle], so an edit survives the
+ * process being killed in the background – including what counts as changed.
  */
 class GameEditViewModel(
-    savedStateHandle: SavedStateHandle,
+    private val savedStateHandle: SavedStateHandle,
     private val repository: GamesRepository,
     private val barcodeLookup: BarcodeLookupRepository,
     private val computeDispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -106,7 +116,13 @@ class GameEditViewModel(
     private val route = savedStateHandle.toRoute<GameEdit>()
     private val gameId: String? = route.gameId
 
-    private val _uiState = MutableStateFlow(GameEditUiState(isEditing = gameId != null, isLoading = gameId != null))
+    /** The form as it was when the previous process was killed, if it was. */
+    private val restored: SavedForm? = savedStateHandle.get<String>(KEY_FORM)?.let(::decodeSavedForm)
+
+    private val _uiState = MutableStateFlow(
+        restored?.let { GameEditUiState(isEditing = gameId != null, form = it.form, initialForm = it.initialForm) }
+            ?: GameEditUiState(isEditing = gameId != null, isLoading = gameId != null),
+    )
     val uiState: StateFlow<GameEditUiState> = _uiState.asStateFlow()
 
     private val _events = Channel<GameEditEvent>(Channel.BUFFERED)
@@ -119,9 +135,19 @@ class GameEditViewModel(
     private var lookupJob: Job? = null
 
     init {
-        if (gameId != null) loadGame(gameId)
-        // Scanned before the form opened ("Scan barcode" in the list).
-        if (gameId == null) route.barcode?.let(::onBarcodeScanned)
+        when {
+            restored != null -> Unit
+            gameId != null -> loadGame(gameId)
+            // Scanned before the form opened ("Scan barcode" in the list).
+            else -> route.barcode?.let(::onBarcodeScanned)
+        }
+        viewModelScope.launch {
+            _uiState
+                .filter { !it.isLoading && it.loadError == null }
+                .map { SavedForm(it.form, it.initialForm) }
+                .distinctUntilChanged()
+                .collect { savedStateHandle[KEY_FORM] = SavedStateJson.encodeToString(SavedForm.serializer(), it) }
+        }
         viewModelScope.launch {
             val games = repository.games.first()
             val suggestions = withContext(computeDispatcher) { GameFacetsCalculator.calculate(games).toSuggestions() }
@@ -130,15 +156,15 @@ class GameEditViewModel(
     }
 
     fun updateForm(transform: (GameForm) -> GameForm) = _uiState.update { state ->
-        val form = transform(state.form)
-        state.copy(form = form, errors = if (validateOnChange) form.errors() else state.errors)
+        val updated = state.copy(form = transform(state.form))
+        if (validateOnChange) updated.copy(errors = updated.validationErrors()) else updated
     }
 
     fun save() {
         val state = _uiState.value
         if (!state.canSave) return
         validateOnChange = true
-        when (val validation = GameFormValidator.validate(state.form)) {
+        when (val validation = state.validate()) {
             is GameFormValidation.Invalid -> {
                 _uiState.update { it.copy(errors = validation.errors) }
                 _events.trySend(GameEditEvent.ShowMessage(UiText(R.string.validation_fix_errors)))
@@ -149,8 +175,10 @@ class GameEditViewModel(
                     val saved = if (gameId == null) {
                         repository.createGame(validation.request)
                     } else {
-                        // Only the fields edited in this form are saved, not stale copies of the others.
-                        val base = (GameFormValidator.validate(state.initialForm) as? GameFormValidation.Valid)?.request
+                        // Only the fields edited in this form are saved, not stale copies of the others. The
+                        // request the edit started from is built the same way, so untouched values never differ.
+                        val initial = state.initialForm
+                        val base = (GameFormValidator.validate(initial, initial) as? GameFormValidation.Valid)?.request
                         repository.updateGame(gameId, validation.request, base)
                     }
                     if (saved != null) {
@@ -268,8 +296,12 @@ class GameEditViewModel(
         }
     }
 
-    private fun GameForm.errors(): Map<GameField, UiText> =
-        (GameFormValidator.validate(this) as? GameFormValidation.Invalid)?.errors.orEmpty()
+    /** An edit validates only the values the user changed (mobile-spec.md, "Validation"); a new game all of them. */
+    private fun GameEditUiState.validate(): GameFormValidation =
+        GameFormValidator.validate(form, initial = initialForm.takeIf { isEditing })
+
+    private fun GameEditUiState.validationErrors(): Map<GameField, UiText> =
+        (validate() as? GameFormValidation.Invalid)?.errors.orEmpty()
 
     private fun GameFacets.toSuggestions() = FormSuggestions(
         genres = genres.map { it.value },
@@ -278,7 +310,18 @@ class GameEditViewModel(
         storageLocations = storageLocations.map { it.value },
     )
 
+    /** What the saved state keeps of the form. */
+    @Serializable
+    private data class SavedForm(val form: GameForm, val initialForm: GameForm)
+
     companion object {
+        private const val KEY_FORM = "gameEditForm"
+        private val SavedStateJson = Json { ignoreUnknownKeys = true }
+
+        /** `null` for a saved form this app version can't read; the form then starts afresh. */
+        private fun decodeSavedForm(json: String): SavedForm? =
+            runCatching { SavedStateJson.decodeFromString(SavedForm.serializer(), json) }.getOrNull()
+
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 GameEditViewModel(

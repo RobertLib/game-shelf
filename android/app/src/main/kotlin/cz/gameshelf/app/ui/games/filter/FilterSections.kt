@@ -24,6 +24,7 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import cz.gameshelf.app.R
+import cz.gameshelf.app.domain.model.SaveGameRequest
 import cz.gameshelf.app.ui.components.DateField
 import java.time.LocalDate
 
@@ -172,8 +173,10 @@ fun DateRangeSection(
 ) {
     FilterSection(title) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            DateField(from, onFromChange, stringResource(R.string.field_from), Modifier.weight(1f), error = error?.let { "" })
-            DateField(to, onToChange, stringResource(R.string.field_to), Modifier.weight(1f), error = error?.let { "" })
+            val years = SaveGameRequest.PURCHASE_YEARS
+            val fieldError = error?.let { "" }
+            DateField(from, onFromChange, stringResource(R.string.field_from), years, Modifier.weight(1f), fieldError)
+            DateField(to, onToChange, stringResource(R.string.field_to), years, Modifier.weight(1f), fieldError)
         }
         FieldError(error)
     }

@@ -6,6 +6,8 @@ enum ErrorMessage {
     static let generic = "Something went wrong. Please try again."
     static let network = "Can't connect to the server. Check your connection."
     static let sessionExpired = "Your session has expired. Please sign in again."
+    /// `401 ACCOUNT_DELETED`; also shown on the sign-in screen after the app signed out because of it.
+    static let accountDeleted = "This account has been deleted."
     /// The sync engine undid local changes the server rejected permanently.
     static let changesRejected = "Some changes were rejected by the server and have been undone."
 
@@ -22,11 +24,13 @@ enum ErrorMessage {
         switch error {
         case .server(let statusCode, let code, let details):
             message(for: code, statusCode: statusCode, details: details)
+        case .http(let statusCode):
+            message(for: .unknown, statusCode: statusCode)
         case .network:
             network
         case .sessionExpired:
             sessionExpired
-        case .invalidResponse:
+        case .undecodable, .invalidResponse:
             generic
         }
     }
@@ -43,6 +47,10 @@ enum ErrorMessage {
             (["Please check the entered data."] + details).joined(separator: "\n")
         case .tooManyRequests:
             "Too many attempts. Please try again in a moment."
+        case .lookupQuotaExceeded:
+            "You've reached today's limit of barcode lookups. Try again tomorrow."
+        case .accountDeleted:
+            accountDeleted
         case .gameNotFound:
             "Game not found."
         case .lookupUnavailable:

@@ -22,6 +22,7 @@ import {
   CurrentUser,
 } from '../common/current-user.decorator.js';
 import { Public } from '../common/public.decorator.js';
+import { AccountThrottle } from '../common/throttling.js';
 import { AuthService } from './auth.service.js';
 import { AuthResponseDto } from './dto/auth-response.dto.js';
 import {
@@ -58,6 +59,7 @@ export class AuthController {
 
   @Public()
   @StrictThrottle()
+  @AccountThrottle()
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
@@ -76,6 +78,10 @@ export class AuthController {
   @ApiOperation({
     operationId: 'refreshTokens',
     summary: 'Exchange a refresh token for a new token pair',
+    description:
+      'The refresh token is single-use. Repeating a refresh whose response was lost, within ' +
+      '2 minutes (by default) and before the token it returned is used, returns a new pair and ' +
+      'invalidates the lost one. Any other reuse of an old token revokes all sessions of the user.',
   })
   @ApiOkResponse({ type: AuthResponseDto })
   @ApiErrorResponses(BAD_REQUEST, UNAUTHORIZED, TOO_MANY_REQUESTS)
@@ -86,7 +92,12 @@ export class AuthController {
   @Public()
   @Post('logout')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ operationId: 'logout', summary: 'Revoke a refresh token' })
+  @ApiOperation({
+    operationId: 'logout',
+    summary: 'Revoke a refresh token',
+    description:
+      'Also revokes the tokens it was already exchanged for, e.g. by a refresh that raced the logout.',
+  })
   @ApiNoContentResponse()
   @ApiErrorResponses(BAD_REQUEST)
   logout(@Body() dto: RefreshTokenDto): Promise<void> {

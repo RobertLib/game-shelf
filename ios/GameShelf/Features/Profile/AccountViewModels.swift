@@ -18,8 +18,7 @@ final class ChangePasswordViewModel {
 
     var newPasswordError: String? {
         guard hasAttemptedSubmit else { return nil }
-        if let error = Validation.newPassword(newPassword) { return error }
-        return newPassword == currentPassword ? "The new password must differ from the current one." : nil
+        return Validation.newPassword(newPassword) ?? Validation.differentPassword(newPassword, from: currentPassword)
     }
 
     var confirmationError: String? {

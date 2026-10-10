@@ -10,6 +10,7 @@ import cz.gameshelf.app.domain.model.onFailure
 import cz.gameshelf.app.ui.auth.AuthValidation
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.appContainer
+import cz.gameshelf.app.ui.common.normalizedText
 import cz.gameshelf.app.ui.common.toUiText
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -51,7 +52,7 @@ class RegisterViewModel(private val authRepository: AuthRepository) : ViewModel(
         val state = _uiState.value
         if (state.isSubmitting) return
         val validated = state.copy(
-            emailError = AuthValidation.email(state.email),
+            emailError = AuthValidation.newAccountEmail(state.email),
             displayNameError = AuthValidation.displayName(state.displayName),
             passwordError = AuthValidation.newPassword(state.password),
             passwordConfirmationError = AuthValidation.passwordConfirmation(state.password, state.passwordConfirmation),
@@ -69,9 +70,9 @@ class RegisterViewModel(private val authRepository: AuthRepository) : ViewModel(
         _uiState.update { it.copy(isSubmitting = true, errorMessage = null) }
         viewModelScope.launch {
             authRepository.register(
-                email = state.email.trim(),
+                email = state.email.normalizedText(),
                 password = state.password,
-                displayName = state.displayName.trim().ifEmpty { null },
+                displayName = state.displayName.normalizedText().ifEmpty { null },
             ).onFailure { error ->
                 _uiState.update { it.copy(isSubmitting = false, errorMessage = error.toUiText()) }
             }

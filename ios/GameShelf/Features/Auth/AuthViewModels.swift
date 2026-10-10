@@ -10,13 +10,13 @@ final class LoginViewModel {
     private(set) var isSubmitting = false
     private(set) var hasAttemptedSubmit = false
 
-    var emailError: String? { hasAttemptedSubmit ? Validation.email(email) : nil }
+    var emailError: String? { hasAttemptedSubmit ? Validation.signInEmail(email) : nil }
     var passwordError: String? { hasAttemptedSubmit ? Validation.requiredPassword(password) : nil }
 
     func submit(using session: SessionStore) async {
         hasAttemptedSubmit = true
         errorMessage = nil
-        guard Validation.email(email) == nil, Validation.requiredPassword(password) == nil, !isSubmitting else { return }
+        guard Validation.signInEmail(email) == nil, Validation.requiredPassword(password) == nil, !isSubmitting else { return }
         isSubmitting = true
         defer { isSubmitting = false }
         do {
@@ -40,12 +40,12 @@ final class RegisterViewModel {
     private(set) var isSubmitting = false
     private(set) var hasAttemptedSubmit = false
 
-    var emailError: String? { hasAttemptedSubmit ? Validation.email(email) : nil }
+    var emailError: String? { hasAttemptedSubmit ? Validation.newAccountEmail(email) : nil }
 
-    var displayNameError: String? { Validation.maxLength(displayName, 100) }
+    var displayNameError: String? { Validation.displayName(displayName) }
 
     var passwordError: String? {
-        hasAttemptedSubmit || password.count > Validation.passwordLength.upperBound ? Validation.newPassword(password) : nil
+        hasAttemptedSubmit || password.codePointCount > Validation.passwordLength.upperBound ? Validation.newPassword(password) : nil
     }
 
     var confirmationError: String? {
@@ -54,7 +54,7 @@ final class RegisterViewModel {
     }
 
     private var isValid: Bool {
-        Validation.email(email) == nil
+        Validation.newAccountEmail(email) == nil
             && displayNameError == nil
             && Validation.newPassword(password) == nil
             && Validation.passwordConfirmation(passwordConfirmation, matching: password) == nil

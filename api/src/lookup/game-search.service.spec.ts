@@ -1,5 +1,8 @@
 import type { HttpStatus } from '@nestjs/common';
+import { plainToInstance } from 'class-transformer';
+import { validateSync } from 'class-validator';
 import { ApiException } from '../common/api-exception.js';
+import { GameSearchQueryDto } from './dto/game-search.dto.js';
 import { GameSearchService } from './game-search.service.js';
 import type { IgdbClient } from './igdb.client.js';
 import type { IgdbGame } from './igdb-match.js';
@@ -150,5 +153,16 @@ describe('GameSearchService', () => {
       status: 503,
       code: 'LOOKUP_UNAVAILABLE',
     });
+  });
+});
+
+describe('GameSearchQueryDto', () => {
+  it('counts the query length in code points', () => {
+    const valid = (q: string) =>
+      validateSync(plainToInstance(GameSearchQueryDto, { q })).length === 0;
+    expect(valid('e\u0301')).toBe(true);
+    expect(valid(' 😀 ')).toBe(false);
+    expect(valid('😀'.repeat(100))).toBe(true);
+    expect(valid('❤️'.repeat(51))).toBe(false);
   });
 });

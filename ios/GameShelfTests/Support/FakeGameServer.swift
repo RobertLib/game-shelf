@@ -2,9 +2,10 @@ import Foundation
 @testable import GameShelf
 
 /// In-memory stand-in for the game endpoints with the semantics of the API: a per-user change
-/// feed with tombstones, idempotent create (`201`/`200`), `PATCH` of selected fields and
-/// `DELETE`. Tests can change data "on another device", make the next call of an operation fail
-/// and hold a call until they release it.
+/// feed with tombstones, idempotent create (`201`/`200`, `404` for a deleted id), `PATCH` and `GET`
+/// (`404 GAME_UNKNOWN` for an id the server has no record of) and `DELETE` (which stores a
+/// tombstone also for an unknown id). Tests can change data "on another device", make the next call
+/// of an operation fail and hold a call until they release it.
 actor FakeGameServer: GameAPI {
     enum Operation: Hashable, Sendable {
         case changes, create, update, delete, get
@@ -14,6 +15,8 @@ actor FakeGameServer: GameAPI {
         var operation: Operation
         var gameID: Game.ID?
         var fields: Set<GameField> = []
+        /// The cursor a `changes` request continued from.
+        var cursor: String?
     }
 
     private(set) var games: [Game.ID: Game] = [:]
@@ -21,7 +24,8 @@ actor FakeGameServer: GameAPI {
     /// Latest change number per game; `deleted` marks tombstones.
     private var feed: [Game.ID: (version: Int, deleted: Bool)] = [:]
     private var version = 0
-    private var failures: [Operation: [(error: APIError, afterApplying: Bool)]] = [:]
+    /// Queued outcomes per operation; `nil` lets that call succeed.
+    private var failures: [Operation: [(error: APIError?, afterApplying: Bool)]] = [:]
     private var pendingFailure: APIError?
     private var isUnreachable = false
 
@@ -62,6 +66,11 @@ actor FakeGameServer: GameAPI {
         failures[operation, default: []].append((error, afterApplying))
     }
 
+    /// The next call of `operation` succeeds; failures queued after it apply to the calls after it.
+    func pass(_ operation: Operation) {
+        failures[operation, default: []].append((nil, false))
+    }
+
     /// While unreachable, every call fails like a request without a connection.
     func setUnreachable(_ unreachable: Bool) {
         isUnreachable = unreachable
@@ -91,7 +100,7 @@ actor FakeGameServer: GameAPI {
     // MARK: GameAPI
 
     func changes(after cursor: String?, limit: Int) async throws -> GameChanges {
-        try await begin(Request(operation: .changes, gameID: nil))
+        try await begin(Request(operation: .changes, gameID: nil, cursor: cursor))
         let since = cursor.flatMap(Int.init) ?? 0
         let entries = feed
             .filter { $0.value.version > since }
@@ -111,6 +120,8 @@ actor FakeGameServer: GameAPI {
             try end()
             return .alreadyExisted(existing)
         }
+        // A deleted game can't be brought back by a delayed create.
+        if feed[id]?.deleted == true { throw Self.notFound }
         let game = Game(id: id, values: values, createdAt: timestamp())
         games[id] = game
         record(id, deleted: false)
@@ -120,7 +131,7 @@ actor FakeGameServer: GameAPI {
 
     func update(id: Game.ID, fields: Set<GameField>, from values: SaveGameRequest) async throws -> Game {
         try await begin(Request(operation: .update, gameID: id, fields: fields))
-        guard var game = games[id] else { throw Self.notFound }
+        guard var game = games[id] else { throw feed[id] == nil ? Self.unknown : Self.notFound }
         game.apply(fields, from: values)
         game.updatedAt = timestamp()
         games[id] = game
@@ -131,20 +142,22 @@ actor FakeGameServer: GameAPI {
 
     func delete(id: Game.ID) async throws {
         try await begin(Request(operation: .delete, gameID: id))
-        guard games.removeValue(forKey: id) != nil else { throw Self.notFound }
+        // An id the server has never seen gets a tombstone too.
+        guard games.removeValue(forKey: id) != nil || feed[id] == nil else { throw Self.notFound }
         record(id, deleted: true)
         try end()
     }
 
     func game(id: Game.ID) async throws -> Game {
         try await begin(Request(operation: .get, gameID: id))
-        guard let game = games[id] else { throw Self.notFound }
+        guard let game = games[id] else { throw feed[id] == nil ? Self.unknown : Self.notFound }
         return game
     }
 
     // MARK: Helpers
 
     static let notFound = APIError.server(statusCode: 404, code: .gameNotFound, details: [])
+    static let unknown = APIError.server(statusCode: 404, code: .gameUnknown, details: [])
 
     private func begin(_ request: Request) async throws {
         if isUnreachable {
@@ -162,10 +175,11 @@ actor FakeGameServer: GameAPI {
         guard var queued = failures[request.operation], !queued.isEmpty else { return }
         let failure = queued.removeFirst()
         failures[request.operation] = queued
+        guard let error = failure.error else { return }
         if failure.afterApplying {
-            pendingFailure = failure.error
+            pendingFailure = error
         } else {
-            throw failure.error
+            throw error
         }
     }
 

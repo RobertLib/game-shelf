@@ -14,7 +14,8 @@ interface ApiEnum {
 
 /**
  * Serializes an [ApiEnum] by its wire value. Values unknown to this app version (e.g. a platform
- * added to a newer API) decode to [fallback] instead of failing the whole response.
+ * added to a newer API) decode to [fallback] instead of failing the whole response; where such a value has to
+ * survive (a stored game), the caller keeps the wire value itself (see `GameSerializer`).
  */
 open class LenientEnumSerializer<T>(
     serialName: String,
@@ -23,6 +24,12 @@ open class LenientEnumSerializer<T>(
 ) : KSerializer<T> where T : Enum<T>, T : ApiEnum {
 
     override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(serialName, PrimitiveKind.STRING)
+
+    /** The wire value an unknown value decodes to. */
+    val fallbackValue: String get() = fallback.apiValue
+
+    /** Whether [raw] is the wire value of an entry, i.e. decodes to itself rather than to the [fallback]. */
+    fun isKnown(raw: String): Boolean = entries.any { it.apiValue == raw }
 
     override fun serialize(encoder: Encoder, value: T) = encoder.encodeString(value.apiValue)
 

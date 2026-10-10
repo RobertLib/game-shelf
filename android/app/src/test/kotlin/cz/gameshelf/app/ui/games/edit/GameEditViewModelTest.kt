@@ -2,14 +2,21 @@ package cz.gameshelf.app.ui.games.edit
 
 import android.app.Application
 import androidx.lifecycle.SavedStateHandle
+import app.cash.turbine.test
 import cz.gameshelf.app.R
+import cz.gameshelf.app.data.api.ApiJson
 import cz.gameshelf.app.data.lookup.BarcodeLookupResult
 import cz.gameshelf.app.domain.model.AppError
+import cz.gameshelf.app.domain.model.CollectionStatus
+import cz.gameshelf.app.domain.model.Condition
+import cz.gameshelf.app.domain.model.ErrorCode
+import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.domain.model.GameSearchResult
 import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.domain.model.Region
 import cz.gameshelf.app.testing.FakeBarcodeLookupRepository
 import cz.gameshelf.app.testing.FakeGamesRepository
+import cz.gameshelf.app.testing.GAME_WITH_UNKNOWN_VALUES_JSON
 import cz.gameshelf.app.testing.MARIO_KART_LOOKUP
 import cz.gameshelf.app.testing.MARIO_KART_SEARCH_RESULT
 import cz.gameshelf.app.testing.testGame
@@ -111,6 +118,20 @@ class GameEditViewModelTest {
 
         assertEquals("Mario Kart 8 Deluxe", viewModel.uiState.value.form.title)
         assertTrue(viewModel.uiState.value.lookup is BarcodeLookupStatus.Found)
+    }
+
+    @Test
+    fun `a used-up lookup quota has its own message`() = runTest {
+        val quota = AppError.Api(429, ErrorCode.LOOKUP_QUOTA_EXCEEDED)
+        lookup.results = mapOf(MARIO_KART_LOOKUP.barcode to BarcodeLookupResult.Failed(quota))
+
+        val viewModel = viewModel("barcode" to "045496420055")
+        advanceUntilIdle()
+
+        assertEquals(
+            BarcodeLookupStatus.Failed(UiText(R.string.error_lookup_quota_exceeded)),
+            viewModel.uiState.value.lookup,
+        )
     }
 
     @Test
@@ -233,6 +254,146 @@ class GameEditViewModelTest {
         assertNull(adding.uiState.value.form.platform)
         assertNull(adding.uiState.value.duplicate)
     }
+
+    @Test
+    fun `a value unknown to this version doesn't block saving an edit of another field`() = runTest {
+        val stored = testGame("1", title = "Doom").copy(status = CollectionStatus.UNKNOWN, condition = Condition.UNKNOWN)
+        repository.stored.value = listOf(stored)
+        val viewModel = viewModel("gameId" to "1")
+        advanceUntilIdle()
+
+        viewModel.events.test {
+            viewModel.updateForm { it.copy(title = "Doom II") }
+            viewModel.save()
+            advanceUntilIdle()
+
+            assertEquals(GameEditEvent.Close, awaitItem())
+        }
+        assertEquals(stored.copy(title = "Doom II"), repository.game("1"))
+    }
+
+    @Test
+    fun `values unknown to this version show their fallback and are kept when another field is saved`() = runTest {
+        val stored = ApiJson.decodeFromString<Game>(GAME_WITH_UNKNOWN_VALUES_JSON)
+        repository.stored.value = listOf(stored)
+        val viewModel = viewModel("gameId" to stored.id)
+        advanceUntilIdle()
+
+        // The pickers show "Other" and "Unknown" until the user picks another value.
+        assertEquals(Platform.OTHER, viewModel.uiState.value.form.platform)
+        assertEquals(CollectionStatus.UNKNOWN, viewModel.uiState.value.form.status)
+
+        viewModel.updateForm { it.copy(title = "Banjo-Tooie") }
+        viewModel.save()
+        advanceUntilIdle()
+
+        val saved = repository.game(stored.id)
+        assertEquals("Banjo-Tooie", saved?.title)
+        assertEquals(stored.unknownEnumValues, saved?.unknownEnumValues)
+    }
+
+    @Test
+    fun `a game deleted by a sync while being edited keeps the form, and saving doesn't bring it back`() = runTest {
+        repository.stored.value = listOf(testGame("1", title = "Doom"))
+        val viewModel = viewModel("gameId" to "1")
+        advanceUntilIdle()
+        viewModel.updateForm { it.copy(title = "Doom II") }
+
+        // Deleted on another device; the sync removes it here.
+        repository.stored.value = emptyList()
+        advanceUntilIdle()
+        assertEquals("Doom II", viewModel.uiState.value.form.title)
+        assertNull(viewModel.uiState.value.loadError)
+
+        viewModel.events.test {
+            viewModel.save()
+            advanceUntilIdle()
+
+            assertEquals(GameEditEvent.ShowMessage(UiText(R.string.error_game_not_found)), awaitItem())
+        }
+        assertEquals("Doom II", viewModel.uiState.value.form.title)
+        assertFalse(viewModel.uiState.value.isSaving)
+        assertEquals(emptyList<Game>(), repository.stored.value)
+    }
+
+    @Test
+    fun `an edit still reports problems with the values the user changed`() = runTest {
+        repository.stored.value = listOf(testGame("1", title = "Doom").copy(status = CollectionStatus.UNKNOWN))
+        val viewModel = viewModel("gameId" to "1")
+        advanceUntilIdle()
+
+        viewModel.updateForm { it.copy(coverImageUrl = "nas/cover.jpg") }
+        viewModel.save()
+        advanceUntilIdle()
+
+        assertEquals(setOf(GameField.COVER_URL), viewModel.uiState.value.errors.keys)
+        assertEquals("Doom", repository.game("1")?.title)
+    }
+
+    @Test
+    fun `an edit survives process death together with what counts as changed`() = runTest {
+        repository.stored.value = listOf(testGame("1", title = "Doom"))
+        val handle = SavedStateHandle(mapOf("gameId" to "1"))
+        val viewModel = GameEditViewModel(handle, repository, lookup, computeDispatcher = Dispatchers.Main)
+        advanceUntilIdle()
+        viewModel.updateForm { it.copy(title = "Doom II", notes = "Big box") }
+        advanceUntilIdle()
+
+        // The process is killed; the saved state is all that is left. A sync changed the game meanwhile.
+        repository.stored.value = listOf(testGame("1", title = "DOOM").copy(rating = 9))
+        val restored = GameEditViewModel(handle.copy(), repository, lookup, computeDispatcher = Dispatchers.Main)
+        advanceUntilIdle()
+
+        val state = restored.uiState.value
+        assertFalse(state.isLoading)
+        assertEquals("Doom II", state.form.title)
+        assertEquals("Big box", state.form.notes)
+        assertEquals("Doom", state.initialForm.title)
+        assertTrue(state.hasChanges)
+        restored.requestClose()
+        assertTrue(restored.uiState.value.showDiscardDialog)
+
+        restored.save()
+        advanceUntilIdle()
+        // Only the edited fields are saved; the rating the sync brought in stays.
+        val saved = repository.game("1")
+        assertEquals("Doom II", saved?.title)
+        assertEquals("Big box", saved?.notes)
+        assertEquals(9, saved?.rating)
+    }
+
+    @Test
+    fun `a new game survives process death without looking the barcode up again`() = runTest {
+        val handle = SavedStateHandle(mapOf("barcode" to MARIO_KART_LOOKUP.barcode))
+        GameEditViewModel(handle, repository, lookup, computeDispatcher = Dispatchers.Main)
+            .updateForm { it.copy(notes = "Gift") }
+        advanceUntilIdle()
+        lookup.lookedUp.clear()
+
+        val restored = GameEditViewModel(handle.copy(), repository, lookup, computeDispatcher = Dispatchers.Main)
+        advanceUntilIdle()
+
+        val state = restored.uiState.value
+        assertEquals("Mario Kart 8 Deluxe", state.form.title)
+        assertEquals("Gift", state.form.notes)
+        assertEquals(GameForm(), state.initialForm)
+        assertTrue(lookup.lookedUp.isEmpty())
+    }
+
+    @Test
+    fun `an unreadable saved form is ignored`() = runTest {
+        repository.stored.value = listOf(testGame("1", title = "Doom"))
+        val handle = SavedStateHandle(mapOf("gameId" to "1", "gameEditForm" to "{not json"))
+
+        val viewModel = GameEditViewModel(handle, repository, lookup, computeDispatcher = Dispatchers.Main)
+        advanceUntilIdle()
+
+        assertEquals("Doom", viewModel.uiState.value.form.title)
+        assertFalse(viewModel.uiState.value.hasChanges)
+    }
+
+    /** What survives process death: the saved state's values (all of them strings here). */
+    private fun SavedStateHandle.copy() = SavedStateHandle(keys().associateWith { get<Any>(it) })
 
     @Test
     fun `a pick cancels a barcode lookup in progress`() = runTest {

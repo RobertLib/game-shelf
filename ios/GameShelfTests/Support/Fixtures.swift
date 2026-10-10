@@ -80,6 +80,29 @@ enum Fixtures {
         get throws { try JSONDecoder.api().decode(Game.self, from: Data(gameJSON.utf8)) }
     }
 
+    /// ``gameJSON`` with a value this app version doesn't know in every enum field, as a newer API sends it.
+    static let unknownValuesGameJSON = gameJSON
+        .replacingOccurrences(of: "\"N64\"", with: "\"PLAYDATE\"")
+        .replacingOccurrences(of: "\"OWNED\"", with: "\"BORROWED_FROM_LIBRARY\"")
+        .replacingOccurrences(of: "\"PHYSICAL\"", with: "\"CLOUD\"")
+        .replacingOccurrences(of: "\"PAL\"", with: "\"SECAM\"")
+        .replacingOccurrences(of: "\"CIB\"", with: "\"DELUXE\"")
+        .replacingOccurrences(of: "\"VERY_GOOD\"", with: "\"GRADED_9_8\"")
+        .replacingOccurrences(of: "\"COMPLETED\"", with: "\"SPEEDRUN\"")
+
+    /// The enum fields of ``unknownValuesGameJSON`` with the strings the API sent.
+    static let unknownWireValues: [GameField: String] = [
+        .platform: "PLAYDATE", .status: "BORROWED_FROM_LIBRARY", .format: "CLOUD", .region: "SECAM",
+        .completeness: "DELUXE", .condition: "GRADED_9_8", .playStatus: "SPEEDRUN",
+    ]
+
+    /// The game of ``unknownValuesGameJSON``; `id` replaces its id.
+    static func gameWithUnknownValues(id: Game.ID = UUID().uuidString.lowercased()) throws -> Game {
+        var game = try JSONDecoder.api().decode(Game.self, from: Data(unknownValuesGameJSON.utf8))
+        game.id = id
+        return game
+    }
+
     /// A game with defaults for everything but the title; `configure` sets what a test is about.
     static func game(
         _ title: String,
@@ -104,5 +127,38 @@ enum Fixtures {
 extension Data {
     var jsonObject: [String: Any] {
         (try? JSONSerialization.jsonObject(with: self)) as? [String: Any] ?? [:]
+    }
+}
+
+extension SaveGameRequest {
+    /// The strings the API sent for the enum values this app version doesn't know, by field.
+    var unknownWireValues: [GameField: String] {
+        let values: [GameField: String?] = [
+            .platform: $platform.unknownWireValue, .status: $status.unknownWireValue, .format: $format.unknownWireValue,
+            .region: $region.unknownWireValue, .completeness: $completeness.unknownWireValue,
+            .condition: $condition.unknownWireValue, .playStatus: $playStatus.unknownWireValue,
+        ]
+        return values.compactMapValues(\.self)
+    }
+}
+
+extension Game {
+    /// The strings the API sent for the enum values this app version doesn't know, by field.
+    var unknownWireValues: [GameField: String] {
+        let values: [GameField: String?] = [
+            .platform: $platform.unknownWireValue, .status: $status.unknownWireValue, .format: $format.unknownWireValue,
+            .region: $region.unknownWireValue, .completeness: $completeness.unknownWireValue,
+            .condition: $condition.unknownWireValue, .playStatus: $playStatus.unknownWireValue,
+        ]
+        return values.compactMapValues(\.self)
+    }
+}
+
+/// Waits until `condition` holds, for at most `timeout`; tests then check it.
+@MainActor
+func waitUntil(timeout: Duration = .seconds(5), _ condition: () -> Bool) async {
+    let deadline = ContinuousClock.now + timeout
+    while !condition(), ContinuousClock.now < deadline {
+        try? await Task.sleep(for: .milliseconds(10))
     }
 }

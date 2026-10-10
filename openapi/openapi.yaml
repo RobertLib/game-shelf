@@ -18,6 +18,30 @@ paths:
       summary: Liveness probe
       tags:
         - health
+  /api/v1/health/ready:
+    get:
+      operationId: getReadiness
+      parameters: []
+      responses:
+        "200":
+          description: ""
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+        "503":
+          description: A service the endpoint relies on is unavailable; try again later
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+      summary: "Readiness probe: the API can reach its database"
+      tags:
+        - health
   /api/v1/auth/register:
     post:
       operationId: register
@@ -80,7 +104,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -96,6 +121,10 @@ paths:
         - auth
   /api/v1/auth/refresh:
     post:
+      description: The refresh token is single-use. Repeating a refresh whose response
+        was lost, within 2 minutes (by default) and before the token it returned
+        is used, returns a new pair and invalidates the lost one. Any other
+        reuse of an old token revokes all sessions of the user.
       operationId: refreshTokens
       parameters: []
       requestBody:
@@ -118,7 +147,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -134,6 +164,8 @@ paths:
         - auth
   /api/v1/auth/logout:
     post:
+      description: Also revokes the tokens it was already exchanged for, e.g. by a
+        refresh that raced the logout.
       operationId: logout
       parameters: []
       requestBody:
@@ -166,7 +198,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/User"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -195,7 +228,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -238,7 +272,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -453,6 +488,7 @@ paths:
           in: query
           schema:
             minimum: 1
+            maximum: 1000000
             default: 1
             type: integer
         - name: pageSize
@@ -477,7 +513,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -519,7 +556,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -553,7 +591,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/GameFacets"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -568,17 +607,19 @@ paths:
       description: "Games created, changed or deleted after `cursor`, oldest change
         first. Start without a cursor, then keep calling with the returned
         `cursor` while `hasMore` is true. 410 SYNC_RESET_REQUIRED means the
-        cursor cannot be continued: drop the synced data and start again without
-        a cursor."
+        cursor cannot be continued: start again without a cursor and push back
+        the local games the full pull does not bring (see offline-sync.md)."
       operationId: listGameChanges
       parameters:
         - name: cursor
           required: false
           in: query
-          description: "`cursor` from the previous response. Omit it to get every game
-            from the beginning."
+          description: Opaque `cursor` from the previous response, sent back exactly as
+            received. Omit it to get every game from the beginning. A cursor
+            from before a restore of the server from a backup is answered with
+            410 SYNC_RESET_REQUIRED.
           schema:
-            example: "42"
+            example: 5f1d3c9a2b.42
             type: string
         - name: limit
           required: false
@@ -602,7 +643,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -620,6 +662,8 @@ paths:
         - games
   /api/v1/games/{id}:
     get:
+      description: "404 GAME_NOT_FOUND: the game was deleted; 404 GAME_UNKNOWN: the
+        server has no record of it (e.g. it was restored from an older backup)."
       operationId: getGame
       parameters:
         - name: id
@@ -642,7 +686,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -660,7 +705,9 @@ paths:
         - games
     put:
       description: "Full replacement: omitted optional fields are cleared, omitted
-        defaults are reset."
+        defaults are reset. 404 GAME_NOT_FOUND: the game was deleted; 404
+        GAME_UNKNOWN: the server has no record of it (e.g. it was restored from
+        an older backup), create it again."
       operationId: updateGame
       parameters:
         - name: id
@@ -689,7 +736,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -706,8 +754,10 @@ paths:
       tags:
         - games
     patch:
-      description: Only the fields present in the body change; `null` clears an
-        optional field.
+      description: "Only the fields present in the body change; `null` clears an
+        optional field. 404 GAME_NOT_FOUND: the game was deleted; 404
+        GAME_UNKNOWN: the server has no record of it (e.g. it was restored from
+        an older backup), create it again."
       operationId: patchGame
       parameters:
         - name: id
@@ -736,7 +786,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -753,7 +804,10 @@ paths:
       tags:
         - games
     delete:
-      description: Deleting a game that is already deleted also succeeds.
+      description: "Deleting a game that is already deleted also succeeds, and so does
+        deleting an id the server has never seen: a tombstone is stored, so a
+        create with that id arriving later is answered 404. 404 only for another
+        user's game."
       operationId: deleteGame
       parameters:
         - name: id
@@ -772,7 +826,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -792,8 +847,12 @@ paths:
     get:
       description: "Looks the EAN / UPC up in external databases and returns details
         to prefill a new game with; nothing is saved. 404 `BARCODE_NOT_FOUND`:
-        the code is not known. 503 `LOOKUP_UNAVAILABLE`: the database cannot be
-        reached or its daily limit is used up."
+        the code is not known (also when the check digit of a 12–14 digit code
+        is wrong). 429 `TOO_MANY_REQUESTS`: too many calls. 429
+        `LOOKUP_QUOTA_EXCEEDED`: the user has used up their daily number of
+        lookups in the barcode database until midnight UTC (results found before
+        do not count). 503 `LOOKUP_UNAVAILABLE`: the database cannot be reached
+        or its daily limit is used up."
       operationId: lookupBarcode
       parameters:
         - name: barcode
@@ -818,7 +877,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -836,8 +896,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: An external service the endpoint relies on is unavailable; try
-            again later
+          description: A service the endpoint relies on is unavailable; try again later
           content:
             application/json:
               schema:
@@ -885,7 +944,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Missing, invalid or expired credentials
+          description: Missing, invalid or expired credentials; `ACCOUNT_DELETED` when the
+            account was deleted
           content:
             application/json:
               schema:
@@ -897,8 +957,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "503":
-          description: An external service the endpoint relies on is unavailable; try
-            again later
+          description: A service the endpoint relies on is unavailable; try again later
           content:
             application/json:
               schema:
@@ -932,12 +991,58 @@ components:
       bearerFormat: JWT
       type: http
   schemas:
+    ErrorCode:
+      type: string
+      enum:
+        - VALIDATION_FAILED
+        - UNAUTHORIZED
+        - ACCOUNT_DELETED
+        - INVALID_CREDENTIALS
+        - INVALID_REFRESH_TOKEN
+        - INVALID_CURRENT_PASSWORD
+        - EMAIL_ALREADY_REGISTERED
+        - GAME_NOT_FOUND
+        - GAME_UNKNOWN
+        - SYNC_RESET_REQUIRED
+        - BARCODE_NOT_FOUND
+        - LOOKUP_UNAVAILABLE
+        - LOOKUP_QUOTA_EXCEEDED
+        - NOT_FOUND
+        - TOO_MANY_REQUESTS
+        - BAD_REQUEST
+        - FORBIDDEN
+        - CONFLICT
+        - INTERNAL_ERROR
+    ErrorResponse:
+      type: object
+      properties:
+        statusCode:
+          type: integer
+          example: 400
+        code:
+          allOf:
+            - $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          example: Validation failed
+        details:
+          description: Individual validation messages, present for VALIDATION_FAILED.
+          example:
+            - email must be an email
+          type: array
+          items:
+            type: string
+      required:
+        - statusCode
+        - code
+        - message
     RegisterRequest:
       type: object
       properties:
         email:
           type: string
           format: email
+          maxLength: 254
           example: collector@example.com
         password:
           type: string
@@ -988,8 +1093,10 @@ components:
         refreshToken:
           type: string
           description: Opaque single-use token for POST /auth/refresh. Every refresh
-            returns a new one; reusing an old token revokes all sessions of the
-            user.
+            returns a new one. Sending the previous token again shortly after (a
+            retry when the response was lost) returns a new pair as long as its
+            replacement is unused; any other reuse of an old token revokes all
+            sessions of the user.
         user:
           $ref: "#/components/schemas/User"
       required:
@@ -997,58 +1104,19 @@ components:
         - expiresIn
         - refreshToken
         - user
-    ErrorCode:
-      type: string
-      enum:
-        - VALIDATION_FAILED
-        - UNAUTHORIZED
-        - INVALID_CREDENTIALS
-        - INVALID_REFRESH_TOKEN
-        - INVALID_CURRENT_PASSWORD
-        - EMAIL_ALREADY_REGISTERED
-        - GAME_NOT_FOUND
-        - SYNC_RESET_REQUIRED
-        - BARCODE_NOT_FOUND
-        - LOOKUP_UNAVAILABLE
-        - NOT_FOUND
-        - TOO_MANY_REQUESTS
-        - BAD_REQUEST
-        - FORBIDDEN
-        - CONFLICT
-        - INTERNAL_ERROR
-    ErrorResponse:
-      type: object
-      properties:
-        statusCode:
-          type: integer
-          example: 400
-        code:
-          allOf:
-            - $ref: "#/components/schemas/ErrorCode"
-        message:
-          type: string
-          example: Validation failed
-        details:
-          description: Individual validation messages, present for VALIDATION_FAILED.
-          example:
-            - email must be an email
-          type: array
-          items:
-            type: string
-      required:
-        - statusCode
-        - code
-        - message
     LoginRequest:
       type: object
       properties:
         email:
           type: string
-          format: email
+          maxLength: 254
+          description: "Not checked for format: an address of no account is answered
+            `INVALID_CREDENTIALS` like a wrong password."
           example: collector@example.com
         password:
           type: string
           format: password
+          maxLength: 128
           example: super-secret-123
       required:
         - email
@@ -1058,6 +1126,7 @@ components:
       properties:
         refreshToken:
           type: string
+          maxLength: 200
       required:
         - refreshToken
     ChangePasswordRequest:
@@ -1066,6 +1135,7 @@ components:
         currentPassword:
           type: string
           format: password
+          maxLength: 128
         newPassword:
           type: string
           format: password
@@ -1080,6 +1150,7 @@ components:
         password:
           type: string
           format: password
+          maxLength: 128
           description: Current password as a confirmation.
       required:
         - password
@@ -1424,9 +1495,9 @@ components:
             format: uuid
         cursor:
           type: string
-          description: Opaque position in the feed. Send it with the next call; store it
-            together with the data of this page.
-          example: "42"
+          description: Opaque position in the feed (do not parse it). Send it with the
+            next call; store it together with the data of this page.
+          example: 5f1d3c9a2b.42
         hasMore:
           type: boolean
           description: More changes are waiting; call again right away with the new cursor.
@@ -1440,7 +1511,9 @@ components:
       properties:
         title:
           type: string
+          minLength: 1
           maxLength: 200
+          description: Trimmed; must not be empty then.
           example: "The Legend of Zelda: Ocarina of Time"
         platform:
           example: N64
@@ -1517,11 +1590,14 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 1299.9
         purchaseDate:
           type: string
           format: date
           nullable: true
+          description: From 1900-01-01 to 2100-12-31.
           example: 2024-05-17
         purchasePlace:
           type: string
@@ -1532,13 +1608,18 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 2500
         currency:
           type: string
           minLength: 3
           maxLength: 3
+          pattern: ^[A-Za-z]{3}$
           default: CZK
-          description: ISO 4217 currency of purchasePrice and estimatedValue.
+          description: "Currency of purchasePrice and estimatedValue: 3 letters A–Z,
+            case-insensitive, stored upper-case. Usually an ISO 4217 code;
+            historic codes such as DEM or SKK are accepted too."
           example: CZK
         storageLocation:
           type: string
@@ -1559,6 +1640,8 @@ components:
           format: uri
           nullable: true
           maxLength: 2048
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
+          description: http(s) URL of ASCII characters; see `pattern`.
         notes:
           type: string
           nullable: true
@@ -1576,7 +1659,9 @@ components:
       properties:
         title:
           type: string
+          minLength: 1
           maxLength: 200
+          description: Trimmed; must not be empty then.
           example: "The Legend of Zelda: Ocarina of Time"
         platform:
           example: N64
@@ -1653,11 +1738,14 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 1299.9
         purchaseDate:
           type: string
           format: date
           nullable: true
+          description: From 1900-01-01 to 2100-12-31.
           example: 2024-05-17
         purchasePlace:
           type: string
@@ -1668,13 +1756,18 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 2500
         currency:
           type: string
           minLength: 3
           maxLength: 3
+          pattern: ^[A-Za-z]{3}$
           default: CZK
-          description: ISO 4217 currency of purchasePrice and estimatedValue.
+          description: "Currency of purchasePrice and estimatedValue: 3 letters A–Z,
+            case-insensitive, stored upper-case. Usually an ISO 4217 code;
+            historic codes such as DEM or SKK are accepted too."
           example: CZK
         storageLocation:
           type: string
@@ -1695,6 +1788,8 @@ components:
           format: uri
           nullable: true
           maxLength: 2048
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
+          description: http(s) URL of ASCII characters; see `pattern`.
         notes:
           type: string
           nullable: true
@@ -1707,7 +1802,9 @@ components:
       properties:
         title:
           type: string
+          minLength: 1
           maxLength: 200
+          description: Trimmed; must not be empty then.
           example: "The Legend of Zelda: Ocarina of Time"
         platform:
           example: N64
@@ -1781,11 +1878,14 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 1299.9
         purchaseDate:
           type: string
           format: date
           nullable: true
+          description: From 1900-01-01 to 2100-12-31.
           example: 2024-05-17
         purchasePlace:
           type: string
@@ -1796,12 +1896,17 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 2500
         currency:
           type: string
           minLength: 3
           maxLength: 3
-          description: ISO 4217 currency of purchasePrice and estimatedValue.
+          pattern: ^[A-Za-z]{3}$
+          description: "Currency of purchasePrice and estimatedValue: 3 letters A–Z,
+            case-insensitive, stored upper-case. Usually an ISO 4217 code;
+            historic codes such as DEM or SKK are accepted too."
           example: CZK
         storageLocation:
           type: string
@@ -1821,6 +1926,8 @@ components:
           format: uri
           nullable: true
           maxLength: 2048
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
+          description: http(s) URL of ASCII characters; see `pattern`.
         notes:
           type: string
           nullable: true
@@ -1873,6 +1980,8 @@ components:
           type: string
           format: uri
           nullable: true
+          maxLength: 2048
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
         sources:
           description: Databases the details come from, to be shown as attribution.
           example:
@@ -1935,6 +2044,8 @@ components:
           type: string
           format: uri
           nullable: true
+          maxLength: 2048
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
       required:
         - igdbId
         - title

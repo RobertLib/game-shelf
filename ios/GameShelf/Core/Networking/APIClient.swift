@@ -22,14 +22,19 @@ final class APIClient: Sendable {
 
     static func makeDefaultSession() -> URLSession {
         let configuration = URLSessionConfiguration.default
+        // Responses hold the collection, which must be gone after sign-out: they are never cached on
+        // the device (docs/mobile-spec.md, "API basics"). Cover images use the shared cache.
+        configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.timeoutIntervalForRequest = 20
         configuration.waitsForConnectivity = false
         configuration.httpAdditionalHeaders = ["Accept": "application/json"]
         return URLSession(configuration: configuration)
     }
 
-    /// Performs the call. Authenticated calls that fail with `401` refresh the
-    /// token pair once and are retried once.
+    /// Performs the call. Authenticated calls that the API answers with `401` (with an API error body)
+    /// refresh the token pair once and are retried once – except `401 ACCOUNT_DELETED`, which ends the
+    /// session (``TokenManager/accountWasDeleted(rejecting:)``).
     func send<Response>(_ endpoint: Endpoint<Response>) async throws -> Response {
         try await response(for: endpoint).value
     }
@@ -45,14 +50,23 @@ final class APIClient: Sendable {
         }
         do {
             return try await perform(endpoint, accessToken: accessToken)
+        } catch let error as APIError where error.isAccountDeleted {
+            // Never refreshed: the account is gone, also when the token has merely expired.
+            await tokens.accountWasDeleted(rejecting: accessToken)
+            throw error
         } catch let error as APIError where error.isUnauthorized {
             let renewedToken = try await tokens.accessToken(replacing: accessToken) { [self] refreshToken in
                 try await perform(.refresh(RefreshTokenRequest(refreshToken: refreshToken)), accessToken: nil).value
             }
             do {
                 return try await perform(endpoint, accessToken: renewedToken)
+            } catch let error as APIError where error.isAccountDeleted {
+                await tokens.accountWasDeleted(rejecting: renewedToken)
+                throw error
             } catch let error as APIError where error.isUnauthorized {
-                await tokens.expire()
+                // The session may have been renewed or replaced meanwhile, or a password change in flight defers
+                // its end: then this is a failure of this request only, not the end of the session.
+                guard await tokens.expire(rejecting: renewedToken) else { throw error }
                 throw APIError.sessionExpired
             }
         }
@@ -72,12 +86,11 @@ final class APIClient: Sendable {
 
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
-            let body = try? decoder.decode(ErrorResponse.self, from: data)
-            throw APIError.server(
-                statusCode: http.statusCode,
-                code: body?.code ?? .unknown,
-                details: body?.details ?? []
-            )
+            // Only a body with the API's error `code` comes from the Game Shelf API.
+            guard let body = try? decoder.decode(ErrorResponse.self, from: data) else {
+                throw APIError.http(statusCode: http.statusCode)
+            }
+            throw APIError.server(statusCode: http.statusCode, code: body.code, details: body.details ?? [])
         }
 
         if let empty = EmptyResponse() as? Response {
@@ -86,7 +99,8 @@ final class APIClient: Sendable {
         do {
             return APIResponse(value: try decoder.decode(Response.self, from: data), statusCode: http.statusCode)
         } catch {
-            throw APIError.invalidResponse
+            debugLog("Failed to decode the \(http.statusCode) response of \(endpoint.method.rawValue) \(endpoint.path): \(error)")
+            throw APIError.undecodable(statusCode: http.statusCode)
         }
     }
 

@@ -1,5 +1,7 @@
 package cz.gameshelf.app.ui.auth.login
 
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -11,15 +13,19 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -30,6 +36,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import cz.gameshelf.app.R
 import cz.gameshelf.app.ui.auth.AuthFormColumn
 import cz.gameshelf.app.ui.auth.FormErrorText
+import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.asString
 import cz.gameshelf.app.ui.components.PasswordField
 import cz.gameshelf.app.ui.components.ProgressButton
@@ -48,7 +55,10 @@ fun LoginRoute(
         onEmailChange = viewModel::onEmailChange,
         onPasswordChange = viewModel::onPasswordChange,
         onSubmit = viewModel::submit,
-        onRegisterClick = onRegisterClick,
+        onRegisterClick = {
+            viewModel.onLeave()
+            onRegisterClick()
+        },
     )
 }
 
@@ -76,6 +86,7 @@ fun LoginScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(24.dp))
+            state.notice?.let { SignOutNotice(it.asString()) }
             Text(
                 stringResource(R.string.login_title),
                 style = MaterialTheme.typography.titleLarge,
@@ -119,12 +130,33 @@ fun LoginScreen(
     }
 }
 
+/** Why the app ended the previous session by itself (mobile-spec.md, "API basics"). */
+@Composable
+private fun SignOutNotice(message: String) {
+    Surface(
+        color = MaterialTheme.colorScheme.secondaryContainer,
+        shape = MaterialTheme.shapes.medium,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite },
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(12.dp),
+        ) {
+            Icon(painterResource(R.drawable.ic_info), contentDescription = null)
+            Text(message, style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
 @Preview(showBackground = true)
 @Composable
 private fun LoginScreenPreview() {
     GameShelfTheme(dynamicColor = false) {
         LoginScreen(
-            state = LoginUiState(email = "collector@example.com"),
+            state = LoginUiState(email = "collector@example.com", notice = UiText(R.string.login_session_expired)),
             onEmailChange = {},
             onPasswordChange = {},
             onSubmit = {},

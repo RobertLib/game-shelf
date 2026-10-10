@@ -43,6 +43,61 @@ struct GameListViewModelTests {
         #expect(model.isCollectionEmpty)
     }
 
+    @Test func localDataThatCantBeOpenedShowsAnErrorWithTryAgain() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "games.sqlite")
+        // Something at the database's path that can't be opened now.
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let repository = GameRepository(store: GameStore(openingOnFirstUse: url), status: SyncStatus())
+        let sync = SyncEngine(repository: repository, api: FakeGameServer())
+        let model = GameListViewModel(sync: sync)
+
+        await sync.activate(ownerID: owner)
+        #expect(model.phase == .failed("Something went wrong. Please try again."))
+
+        try FileManager.default.removeItem(at: url)
+        await model.retry()
+        #expect(repository.isLoaded)
+        #expect(model.phase != .failed("Something went wrong. Please try again."))
+        try await sync.syncNow()
+        await model.updateResults()
+        #expect(model.isCollectionEmpty)
+    }
+
+    @Test func aFailedActivationNeverShowsThePreviousUsersCollection() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "games.sqlite")
+        let server = FakeGameServer()
+        await server.seed(Fixtures.game("Doom"))
+        let repository = GameRepository(store: try GameStore(url: url), status: SyncStatus())
+        let sync = SyncEngine(repository: repository, api: server)
+        repository.onLocalChange = nil
+        await sync.activate(ownerID: owner)
+        try await sync.syncNow()
+        try await repository.create(SaveGameRequest(title: "Unsynced", platform: .pc))
+        let model = GameListViewModel(sync: sync)
+        await model.updateResults()
+        #expect(model.games.count == 2)
+
+        // Another process holds the database, so the next user's data can't be prepared now.
+        let other = try SQLiteConnection(url: url)
+        try other.execute("BEGIN IMMEDIATE")
+        await sync.activate(ownerID: "user-2")
+        await model.updateResults()
+        #expect(repository.isEmpty)
+        #expect(model.games.isEmpty)
+        #expect(model.syncStatus.pendingCount == 0)
+        #expect(model.phase == .failed("Something went wrong. Please try again."))
+
+        try other.execute("ROLLBACK")
+        await model.retry()
+        #expect(repository.isLoaded)
+        #expect(repository.isEmpty)
+    }
+
     @Test func resultsFollowTheCollectionAndTheQuery() async throws {
         let server = FakeGameServer()
         await server.seed(Fixtures.game("Super Mario World", .snes))

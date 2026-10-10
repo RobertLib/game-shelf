@@ -7,9 +7,13 @@ plugins {
 }
 
 val debugApiBaseUrl = "http://10.0.2.2:3000/api/v1/"
-val releaseApiBaseUrl: String = providers.gradleProperty("gameshelf.apiBaseUrl")
-    .getOrElse("https://api.example.com/api/v1/")
-    .also { require(it.endsWith("/")) { "gameshelf.apiBaseUrl must end with '/' (got '$it')" } }
+
+// Required to package a release (see checkReleaseApiBaseUrl below); debug builds and tests don't need it.
+// HTTPS only: release builds don't allow cleartext traffic.
+val releaseApiBaseUrlProperty: Provider<String> = providers.gradleProperty("gameshelf.apiBaseUrl")
+val releaseApiBaseUrl: String? = releaseApiBaseUrlProperty.orNull
+    ?.also { require(it.startsWith("https://")) { "gameshelf.apiBaseUrl must start with 'https://' (got '$it')" } }
+    ?.also { require(it.endsWith("/")) { "gameshelf.apiBaseUrl must end with '/' (got '$it')" } }
 
 android {
     namespace = "cz.gameshelf.app"
@@ -34,7 +38,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            buildConfigField("String", "API_BASE_URL", "\"$releaseApiBaseUrl\"")
+            // Empty without gameshelf.apiBaseUrl – such a release is never packaged.
+            buildConfigField("String", "API_BASE_URL", "\"${releaseApiBaseUrl.orEmpty()}\"")
         }
     }
 
@@ -48,6 +53,11 @@ android {
         buildConfig = true
     }
 
+    // The UI is English only: no library texts (e.g. Material's) in the device language next to it.
+    androidResources {
+        localeFilters += "en"
+    }
+
     testOptions {
         unitTests.isIncludeAndroidResources = true
         unitTests.isReturnDefaultValues = true
@@ -56,6 +66,24 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+}
+
+// A release must never ship without its API address: packaging one (APK or bundle) fails without it.
+val checkReleaseApiBaseUrl = tasks.register("checkReleaseApiBaseUrl") {
+    description = "Checks that gameshelf.apiBaseUrl is set for a release build."
+    val apiBaseUrl = releaseApiBaseUrlProperty
+    doLast {
+        if (!apiBaseUrl.isPresent) {
+            throw GradleException(
+                "A release build needs the address of the API. Pass it with " +
+                    "-Pgameshelf.apiBaseUrl=https://games.example.org/api/v1/ (https://, ending with '/'), " +
+                    "or set gameshelf.apiBaseUrl in ~/.gradle/gradle.properties.",
+            )
+        }
+    }
+}
+tasks.named { it == "packageRelease" || it == "packageReleaseBundle" }.configureEach {
+    dependsOn(checkReleaseApiBaseUrl)
 }
 
 room {

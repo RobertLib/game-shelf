@@ -27,13 +27,17 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 
-/** Read-only date field: tapping it opens a [DatePickerDialog]; a set date can be cleared. */
+/**
+ * Read-only date field: tapping it opens a [DatePickerDialog] that offers only the years of [yearRange]; a set date
+ * can be cleared.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DateField(
     value: LocalDate?,
     onValueChange: (LocalDate?) -> Unit,
     label: String,
+    yearRange: IntRange,
     modifier: Modifier = Modifier,
     error: String? = null,
 ) {
@@ -67,7 +71,11 @@ fun DateField(
     )
 
     if (showPicker) {
-        val pickerState = rememberDatePickerState(initialSelectedDateMillis = value?.toUtcMillis())
+        // A date outside the range (e.g. from the server) is not selected, the picker opens on today.
+        val pickerState = rememberDatePickerState(
+            initialSelectedDateMillis = value?.toUtcMillis(),
+            yearRange = yearRange,
+        )
         DatePickerDialog(
             onDismissRequest = { showPicker = false },
             confirmButton = {

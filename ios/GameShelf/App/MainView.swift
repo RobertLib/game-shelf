@@ -31,7 +31,7 @@ struct MainView: View {
             ErrorMessage.changesRejected,
             isPresented: Binding(
                 get: { sync.status.hasUndoneRejectedChanges },
-                set: { if !$0 { sync.status.hasUndoneRejectedChanges = false } }
+                set: { if !$0 { sync.repository.acknowledgeUndoneRejectedChanges() } }
             ),
             actions: { Button("OK", role: .cancel) {} }
         )

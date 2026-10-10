@@ -66,7 +66,7 @@ fun GameCover(
         }
         if (!coverUrl.isNullOrBlank()) {
             AsyncImage(
-                model = coverUrl,
+                model = coverLoadUrl(coverUrl),
                 contentDescription = stringResource(R.string.cover_description, title),
                 contentScale = contentScale,
                 modifier = Modifier.matchParentSize(),
@@ -74,3 +74,13 @@ fun GameCover(
         }
     }
 }
+
+/**
+ * Images load only over HTTPS (Android's cleartext policy blocks `http://`): an `http://` cover, which is a valid
+ * URL, is loaded from the same address with `https://` (mobile-spec.md, "Add game / Edit game").
+ */
+internal fun coverLoadUrl(url: String): String =
+    if (url.startsWith(HTTP_PREFIX, ignoreCase = true)) HTTPS_PREFIX + url.substring(HTTP_PREFIX.length) else url
+
+private const val HTTP_PREFIX = "http://"
+private const val HTTPS_PREFIX = "https://"

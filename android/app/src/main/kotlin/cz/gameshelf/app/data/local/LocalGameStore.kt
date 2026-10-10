@@ -17,11 +17,15 @@ data class SyncState(
     val ownerUserId: String? = null,
     val cursor: String? = null,
     val lastSyncedAt: Instant? = null,
+    /** `versionCode` of the app that stored [cursor]; a cursor of another version is not continued. */
+    val appVersion: Int? = null,
+    /** Undone rejected changes still have to be reported to the user. */
+    val reportRejectedChanges: Boolean = false,
 )
 
 /**
- * Typed access to [GameShelfDatabase]: games decoded from their JSON payload, pending changes and the
- * sync state. Every multi-step change runs inside [transaction].
+ * Typed access to [GameShelfDatabase]: games decoded from their JSON payload, pending changes, the sync
+ * state and the games a sync reset has not confirmed yet. Every multi-step change runs inside [transaction].
  */
 class LocalGameStore(
     private val database: GameShelfDatabase,
@@ -50,13 +54,15 @@ class LocalGameStore(
 
     fun observeGame(id: String): Flow<Game?> = dao.observeGame(id).map { it?.let(::decode) }.distinctUntilChanged()
 
+    /** `null` when the game is not stored, or stored in a form this app version can't read (see [isStored]). */
     suspend fun game(id: String): Game? = dao.game(id)?.let(::decode)
+
+    /** Whether a row of the game is stored, readable by this app version or not. */
+    suspend fun isStored(id: String): Boolean = dao.gameExists(id)
 
     suspend fun putGame(game: Game) = dao.upsertGame(GameEntity(game.id, json.encodeToString(Game.serializer(), game)))
 
     suspend fun removeGame(id: String) = dao.deleteGame(id)
-
-    suspend fun removeGamesWithoutPendingChange() = dao.deleteGamesWithoutPendingChange()
 
     /** Oldest first. */
     suspend fun pendingChanges(): List<PendingChange> = dao.pendingChanges().map { it.toModel() }
@@ -75,10 +81,20 @@ class LocalGameStore(
 
     suspend fun putSyncState(state: SyncState) = dao.upsertSyncState(state.toEntity())
 
+    /** A sync reset: every game without a pending change is unconfirmed until the pull brings it. */
+    suspend fun markGamesWithoutPendingChangeUnconfirmed() = dao.markGamesWithoutPendingChangeUnconfirmed()
+
+    suspend fun unconfirmedGameIds(): List<String> = dao.unconfirmedGameIds()
+
+    suspend fun confirmGame(id: String) = dao.deleteUnconfirmedGame(id)
+
+    suspend fun clearUnconfirmedGames() = dao.deleteAllUnconfirmedGames()
+
     /** Deletes all games, pending changes and sync progress and hands the store over to [owner]. */
     suspend fun wipe(owner: String?) = transaction {
         dao.deleteAllGames()
         dao.deleteAllPendingChanges()
+        dao.deleteAllUnconfirmedGames()
         dao.upsertSyncState(SyncState(ownerUserId = owner).toEntity())
     }
 
@@ -101,10 +117,13 @@ private fun PendingChangeEntity.toModel() = PendingChange(gameId, kind, fields, 
 
 private fun PendingChange.toEntity() = PendingChangeEntity(gameId, kind, fields, revision, attempted, queuedAt)
 
-private fun SyncStateEntity.toModel() = SyncState(ownerUserId, cursor, lastSyncedAt?.let(Instant::ofEpochMilli))
+private fun SyncStateEntity.toModel() =
+    SyncState(ownerUserId, cursor, lastSyncedAt?.let(Instant::ofEpochMilli), appVersion, reportRejectedChanges)
 
 private fun SyncState.toEntity() = SyncStateEntity(
     ownerUserId = ownerUserId,
     cursor = cursor,
     lastSyncedAt = lastSyncedAt?.toEpochMilli(),
+    appVersion = appVersion,
+    reportRejectedChanges = reportRejectedChanges,
 )

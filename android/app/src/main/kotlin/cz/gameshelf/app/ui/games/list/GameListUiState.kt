@@ -54,6 +54,12 @@ data class GameListUiState(
 sealed interface GameListEvent {
     data class ShowMessage(val message: UiText) : GameListEvent
 
+    /** Show that changes rejected by the server were undone, then call [GameListViewModel.onChangesRejectedShown]. */
+    data object ChangesRejected : GameListEvent
+
     /** Search, filters, sort or grouping changed; the list should start from the top. */
     data object ScrollToTop : GameListEvent
+
+    /** A barcode was scanned from the list: open the new game form with it. */
+    data class AddScannedGame(val barcode: String) : GameListEvent
 }

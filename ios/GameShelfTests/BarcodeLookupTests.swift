@@ -141,6 +141,14 @@ struct BarcodeLookupServiceTests {
         }
         #expect(ErrorMessage.message(for: try #require(error)) == "The game database isn't available right now. Try again later.")
     }
+
+    @Test func aUsedUpDailyQuotaIsReported() async throws {
+        let body = Fixtures.errorJSON(status: 429, code: "LOOKUP_QUOTA_EXCEEDED")
+        let error = await #expect(throws: APIError.server(statusCode: 429, code: .lookupQuotaExceeded, details: [])) {
+            try await makeService(status: 429, body: body).lookup(barcode: "0045496420055")
+        }
+        #expect(ErrorMessage.message(for: try #require(error)) == "You've reached today's limit of barcode lookups. Try again tomorrow.")
+    }
 }
 
 @MainActor

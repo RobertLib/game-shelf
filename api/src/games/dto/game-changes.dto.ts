@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Matches, Max, Min } from 'class-validator';
+import { CURSOR_REGEX } from '../sync-cursor.js';
 import { GameDto } from './game.dto.js';
 
 export const MAX_CHANGES_LIMIT = 1000;
@@ -8,11 +9,13 @@ export const MAX_CHANGES_LIMIT = 1000;
 export class GameChangesQueryDto {
   @ApiPropertyOptional({
     description:
-      '`cursor` from the previous response. Omit it to get every game from the beginning.',
-    example: '42',
+      'Opaque `cursor` from the previous response, sent back exactly as received. Omit it to ' +
+      'get every game from the beginning. A cursor from before a restore of the server from a ' +
+      'backup is answered with 410 SYNC_RESET_REQUIRED.',
+    example: '5f1d3c9a2b.42',
   })
   @IsOptional()
-  @Matches(/^\d{1,10}$/, { message: 'cursor is invalid' })
+  @Matches(CURSOR_REGEX, { message: 'cursor is invalid' })
   cursor?: string;
 
   @ApiPropertyOptional({
@@ -48,8 +51,9 @@ export class GameChangesDto {
 
   @ApiProperty({
     description:
-      'Opaque position in the feed. Send it with the next call; store it together with the data of this page.',
-    example: '42',
+      'Opaque position in the feed (do not parse it). Send it with the next call; store it ' +
+      'together with the data of this page.',
+    example: '5f1d3c9a2b.42',
   })
   cursor: string;
 

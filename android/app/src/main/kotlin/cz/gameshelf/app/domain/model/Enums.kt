@@ -169,10 +169,17 @@ enum class ErrorCode : ApiEnum {
     INVALID_REFRESH_TOKEN,
     INVALID_CURRENT_PASSWORD,
     EMAIL_ALREADY_REGISTERED,
+
+    /** `401`: the account was deleted (e.g. on another device); never refreshed, the session ends like a sign-out. */
+    ACCOUNT_DELETED,
     GAME_NOT_FOUND,
+    GAME_UNKNOWN,
     SYNC_RESET_REQUIRED,
     BARCODE_NOT_FOUND,
     LOOKUP_UNAVAILABLE,
+
+    /** `429`: the user has used up today's barcode lookups (until midnight UTC). */
+    LOOKUP_QUOTA_EXCEEDED,
     NOT_FOUND,
     TOO_MANY_REQUESTS,
     BAD_REQUEST,

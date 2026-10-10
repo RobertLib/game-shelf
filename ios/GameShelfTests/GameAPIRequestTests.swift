@@ -83,6 +83,67 @@ struct GameAPIRequestTests {
         #expect(next.httpMethod == "GET")
     }
 
+    @Test(arguments: [
+        (404, "<html><body>Not Found</body></html>", APIError.http(statusCode: 404)),
+        (403, "Forbidden by the firewall", .http(statusCode: 403)),
+        (502, "", .http(statusCode: 502)),
+        (404, #"{"statusCode":404,"error":"Not Found"}"#, .http(statusCode: 404)),
+        (404, #"{"statusCode":404,"code":"GAME_NOT_FOUND","message":"Game not found"}"#, .server(statusCode: 404, code: .gameNotFound, details: [])),
+        (418, #"{"code":"BRAND_NEW_CODE"}"#, .server(statusCode: 418, code: .unknown, details: [])),
+        (400, #"{"statusCode":400,"code":"VALIDATION_FAILED","message":"Bad","details":["title is too long"]}"#,
+         .server(statusCode: 400, code: .validationFailed, details: ["title is too long"])),
+    ])
+    func onlyResponsesWithAnAPIErrorBodyAreServerErrors(status: Int, body: String, expected: APIError) async {
+        let (api, _, _) = makeAPI { _ in (status, Data(body.utf8)) }
+        await #expect(throws: expected) {
+            try await api.delete(id: "abc")
+        }
+    }
+
+    @Test func aGameOfAPageThatCantBeDecodedDoesNotFailThePage() async throws {
+        let unreadable = Fixtures.gameJSON
+            .replacingOccurrences(of: "01a1163b-0cb1-75e9-bd4e-4a7feec69237", with: "01a1163b-0cb1-75e9-bd4e-4a7feec69239")
+            .replacingOccurrences(of: "\"quantity\": 2", with: "\"quantity\": \"two\"")
+        let body = Data("""
+        {"games": [\(unreadable), \(Fixtures.gameJSON)], "deletedIds": [], "cursor": "5f1d3c9a2b.42", "hasMore": false}
+        """.utf8)
+        let (api, _, _) = makeAPI { _ in (200, body) }
+
+        let page = try await api.changes(after: "5f1d3c9a2b.41", limit: 500)
+
+        #expect(page.games.map(\.id) == ["01a1163b-0cb1-75e9-bd4e-4a7feec69237"])
+        #expect(page.cursor == "5f1d3c9a2b.42")
+    }
+
+    @Test(arguments: [201, 200]) @MainActor
+    func aSuccessWhoseGameCantBeDecodedIsAFailureOfThatChange(status: Int) async throws {
+        let body = Fixtures.gameJSON.replacingOccurrences(of: "\"quantity\": 2", with: "\"quantity\": \"two\"")
+        let (api, _, _) = makeAPI { _ in (status, Data(body.utf8)) }
+        let error = await #expect(throws: APIError.undecodable(statusCode: status)) {
+            _ = try await api.create(id: "01a1163b-0cb1-75e9-bd4e-4a7feec69237", SaveGameRequest(title: "Zelda", platform: .n64))
+        }
+        #expect(SyncEngine.classify(try #require(error)) == .changeFailed)
+    }
+
+    @Test @MainActor func aSuccessThatIsntAnAPIResponseAtAllFailsTheSameWay() async throws {
+        // E.g. a captive portal's page: the pull then fails too.
+        let (api, _, _) = makeAPI { _ in (200, Data("<html>Sign in to the Wi-Fi</html>".utf8)) }
+        await #expect(throws: APIError.undecodable(statusCode: 200)) {
+            _ = try await api.update(id: "abc", fields: [.notes], from: SaveGameRequest(title: "Zelda", platform: .n64))
+        }
+        await #expect(throws: APIError.undecodable(statusCode: 200)) {
+            _ = try await api.changes(after: nil, limit: 500)
+        }
+    }
+
+    @Test @MainActor func aGetOfAGameTheServerHasNoRecordOfIsRecognized() async throws {
+        let (api, _, _) = makeAPI { _ in (404, Fixtures.errorJSON(status: 404, code: "GAME_UNKNOWN")) }
+        let error = await #expect(throws: APIError.server(statusCode: 404, code: .gameUnknown, details: [])) {
+            _ = try await api.game(id: "abc")
+        }
+        #expect(SyncEngine.classify(try #require(error)) == .gameUnknown)
+    }
+
     @Test func resetRequiredIsRecognized() async throws {
         let (api, _, _) = makeAPI { _ in (410, Fixtures.errorJSON(status: 410, code: "SYNC_RESET_REQUIRED")) }
         await #expect(throws: APIError.server(statusCode: 410, code: .syncResetRequired, details: [])) {

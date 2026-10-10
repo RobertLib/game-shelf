@@ -16,6 +16,8 @@ import cz.gameshelf.app.domain.model.Region
 import cz.gameshelf.app.domain.model.SaveGameRequest
 import cz.gameshelf.app.domain.model.toSaveRequest
 import cz.gameshelf.app.testing.FULL_GAME_JSON
+import cz.gameshelf.app.testing.GAME_WITH_UNKNOWN_VALUES_JSON
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -134,6 +136,62 @@ class ApiJsonTest {
         assertEquals(Completeness.UNKNOWN, game.completeness)
         assertEquals(Condition.UNKNOWN, game.condition)
         assertEquals(PlayStatus.UNKNOWN, game.playStatus)
+        // The values themselves are kept.
+        assertEquals(
+            mapOf(
+                "platform" to "PLAYSTATION_6",
+                "status" to "BORROWED",
+                "format" to "CLOUD",
+                "region" to "NTSC_C",
+                "completeness" to "CART_ONLY",
+                "condition" to "GRADED",
+                "playStatus" to "PLATINUM",
+            ),
+            game.unknownEnumValues,
+        )
+    }
+
+    @Test
+    fun `a game keeps values unknown to this version through its JSON, verbatim`() {
+        val game = ApiJson.decodeFromString<Game>(GAME_WITH_UNKNOWN_VALUES_JSON)
+
+        val json = ApiJson.encodeToJsonElement(Game.serializer(), game).jsonObject
+
+        assertEquals(JsonPrimitive("PLAYSTATION_6"), json["platform"])
+        assertEquals(JsonPrimitive("BORROWED"), json["status"])
+        assertEquals(JsonPrimitive("PAL"), json["region"])
+        assertFalse("unknownEnumValues" in json)
+        val again = ApiJson.decodeFromJsonElement(Game.serializer(), json)
+        assertEquals(game.unknownEnumValues, again.unknownEnumValues)
+        assertEquals(json, ApiJson.encodeToJsonElement(Game.serializer(), again))
+    }
+
+    @Test
+    fun `a value that replaced the unknown one is written instead of it`() {
+        val game = ApiJson.decodeFromString<Game>(GAME_WITH_UNKNOWN_VALUES_JSON)
+
+        val picked = game.copy(status = CollectionStatus.WISHLIST)
+
+        val json = ApiJson.encodeToJsonElement(Game.serializer(), picked).jsonObject
+
+        assertEquals(JsonPrimitive("WISHLIST"), json["status"])
+        assertEquals(JsonPrimitive("PLAYSTATION_6"), json["platform"])
+        val decoded = ApiJson.decodeFromJsonElement(Game.serializer(), json)
+        assertEquals(mapOf("platform" to "PLAYSTATION_6"), decoded.unknownEnumValues)
+    }
+
+    @Test
+    fun `known values and fallbacks stored by an older version are not unknown values`() {
+        assertEquals(emptyMap<String, String>(), ApiJson.decodeFromString<Game>(FULL_GAME_JSON).unknownEnumValues)
+
+        val stored = ApiJson.decodeFromString<Game>(
+            FULL_GAME_JSON.replace("\"status\": \"OWNED\"", "\"status\": \"UNKNOWN\"")
+                .replace("\"platform\": \"N64\"", "\"platform\": \"OTHER\""),
+        )
+
+        assertEquals(CollectionStatus.UNKNOWN, stored.status)
+        assertEquals(Platform.OTHER, stored.platform)
+        assertEquals(emptyMap<String, String>(), stored.unknownEnumValues)
     }
 
     @Test
@@ -156,6 +214,38 @@ class ApiJsonTest {
         assertEquals(listOf("0b9e3f4a-1c2d-4e5f-8a9b-0c1d2e3f4a5b"), page.deletedIds)
         assertEquals("1234", page.cursor)
         assertTrue(page.hasMore)
+    }
+
+    @Test
+    fun `a change feed page skips a game this version can't decode and keeps the rest`() {
+        val broken = FULL_GAME_JSON
+            .replace("01a1163d-d903-7036-b56d-72a9d3b2a6c4", "5b6c7d8e-0000-4000-8000-000000000001")
+            .replace("\"purchaseDate\": \"2024-05-17\"", "\"purchaseDate\": \"17. 5. 2024\"")
+        val noTitle = FULL_GAME_JSON
+            .replace("01a1163d-d903-7036-b56d-72a9d3b2a6c4", "5b6c7d8e-0000-4000-8000-000000000002")
+            .replace("\"title\": \"Banjo-Kazooie\",", "")
+        val json = """{"games":[$broken,$FULL_GAME_JSON,$noTitle,{"title":"no id"}],
+            "deletedIds":["0b9e3f4a-1c2d-4e5f-8a9b-0c1d2e3f4a5b"],"cursor":"5f1d3c9a2b.42","hasMore":true}"""
+
+        val page = ApiJson.decodeFromString<GameChanges>(json)
+
+        assertEquals(listOf("Banjo-Kazooie"), page.games.map { it.title })
+        assertEquals(
+            listOf("5b6c7d8e-0000-4000-8000-000000000001", "5b6c7d8e-0000-4000-8000-000000000002"),
+            page.undecodableGameIds,
+        )
+        assertEquals(listOf("0b9e3f4a-1c2d-4e5f-8a9b-0c1d2e3f4a5b"), page.deletedIds)
+        assertEquals("5f1d3c9a2b.42", page.cursor)
+        assertTrue(page.hasMore)
+    }
+
+    @Test
+    fun `a change feed page that is malformed itself still fails`() {
+        val json = """{"games":[$FULL_GAME_JSON],"deletedIds":[],"hasMore":false}"""
+
+        val failure = runCatching { ApiJson.decodeFromString<GameChanges>(json) }.exceptionOrNull()
+
+        assertTrue(failure.toString(), failure is SerializationException)
     }
 
     @Test

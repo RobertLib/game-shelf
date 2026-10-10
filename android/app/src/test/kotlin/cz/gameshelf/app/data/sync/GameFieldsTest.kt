@@ -2,12 +2,16 @@ package cz.gameshelf.app.data.sync
 
 import cz.gameshelf.app.data.api.ApiJson
 import cz.gameshelf.app.domain.model.CollectionStatus
+import cz.gameshelf.app.domain.model.Condition
 import cz.gameshelf.app.domain.model.Game
+import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.domain.model.toSaveRequest
 import cz.gameshelf.app.testing.FULL_GAME_JSON
+import cz.gameshelf.app.testing.GAME_WITH_UNKNOWN_VALUES_JSON
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.math.BigDecimal
@@ -71,6 +75,72 @@ class GameFieldsTest {
         assertEquals(setOf("rating", "title"), body.keys)
         assertEquals(JsonNull, body["rating"])
         assertEquals(JsonPrimitive("Banjo"), body["title"])
+    }
+
+    @Test
+    fun `fallbacks without the value they stand for (stored by an older version) are never sent`() {
+        val stored = game.copy(status = CollectionStatus.UNKNOWN, condition = Condition.UNKNOWN, title = "Banjo")
+
+        val patch = GameFields.patchBody(stored, setOf("title", "status", "condition"))
+        val create = GameFields.createBody(stored)
+
+        assertEquals(setOf("title"), patch.keys)
+        assertEquals(GameFields.ALL + "id" - "status" - "condition", create.keys)
+        assertFalse(JsonPrimitive("UNKNOWN") in create.values)
+    }
+
+    /** As decoded from the API. */
+    private val withUnknownValues = ApiJson.decodeFromString<Game>(GAME_WITH_UNKNOWN_VALUES_JSON)
+
+    @Test
+    fun `create body sends values unknown to this version as the API sent them`() {
+        val body = GameFields.createBody(withUnknownValues)
+
+        assertEquals(GameFields.ALL + "id", body.keys)
+        assertEquals(JsonPrimitive("PLAYSTATION_6"), body["platform"])
+        assertEquals(JsonPrimitive("BORROWED"), body["status"])
+    }
+
+    @Test
+    fun `an edit of other fields never patches them, and keeps them for a create`() {
+        // The form's initial and saved requests, built the same way.
+        val opened = withUnknownValues.toSaveRequest()
+        val saved = opened.copy(title = "Banjo-Tooie")
+        val fields = GameFields.diff(opened, saved)
+
+        val updated = GameFields.apply(withUnknownValues, saved, fields)
+
+        assertEquals(setOf("title"), fields)
+        assertEquals(setOf("title"), GameFields.patchBody(updated, fields).keys)
+        assertEquals(withUnknownValues.unknownEnumValues, updated.unknownEnumValues)
+        assertEquals(JsonPrimitive("PLAYSTATION_6"), GameFields.createBody(updated)["platform"])
+    }
+
+    @Test
+    fun `a value the user picks replaces the one this version doesn't know`() {
+        val opened = withUnknownValues.toSaveRequest()
+        val saved = opened.copy(platform = Platform.PS5, status = CollectionStatus.WISHLIST)
+        val fields = GameFields.diff(opened, saved)
+
+        val updated = GameFields.apply(withUnknownValues, saved, fields)
+
+        assertEquals(setOf("platform", "status"), fields)
+        assertEquals(emptyMap<String, String>(), updated.unknownEnumValues)
+        val patch = GameFields.patchBody(updated, fields)
+        assertEquals(JsonPrimitive("PS5"), patch["platform"])
+        assertEquals(JsonPrimitive("WISHLIST"), patch["status"])
+        assertEquals(JsonPrimitive("WISHLIST"), GameFields.createBody(updated)["status"])
+    }
+
+    @Test
+    fun `merge keeps the server's unknown values outside the pending fields`() {
+        val picked = withUnknownValues.toSaveRequest().copy(platform = Platform.PS5)
+        val local = GameFields.apply(withUnknownValues, picked, setOf("platform"))
+
+        val merged = GameFields.merge(withUnknownValues, local, setOf("platform"))
+
+        assertEquals(Platform.PS5, merged.platform)
+        assertEquals(mapOf("status" to "BORROWED"), merged.unknownEnumValues)
     }
 
     @Test

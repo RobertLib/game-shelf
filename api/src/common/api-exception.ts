@@ -11,3 +11,14 @@ export class ApiException extends HttpException {
     super(message, status);
   }
 }
+
+/**
+ * The signed-in user's account no longer exists. The apps sign out and wipe
+ * their local copy of the collection, unlike when a session merely expires.
+ */
+export const accountDeleted = () =>
+  new ApiException(
+    HttpStatus.UNAUTHORIZED,
+    ErrorCode.ACCOUNT_DELETED,
+    'The account has been deleted',
+  );

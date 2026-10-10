@@ -42,7 +42,7 @@ struct GameFormView: View {
         }
         .sheet(isPresented: $isSearchingDatabase) {
             GameSearchView(
-                query: model.draft.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                query: model.draft.title.normalizedText,
                 platform: model.draft.platform
             ) { pick in
                 withAnimation { model.fill(fromSearch: pick) }
@@ -201,12 +201,8 @@ struct GameFormView: View {
 
     private var collectorSection: some View {
         Section("Collector details") {
-            Picker("Status", selection: $model.draft.status) {
-                ForEach(CollectionStatus.allCases, id: \.self) { Text($0.label).tag($0) }
-            }
-            Picker("Format", selection: $model.draft.format) {
-                ForEach(GameFormat.allCases, id: \.self) { Text($0.label).tag($0) }
-            }
+            EnumPicker(title: "Status", selection: $model.draft.status)
+            EnumPicker(title: "Format", selection: $model.draft.format)
             OptionalEnumPicker(title: "Region", selection: $model.draft.region)
             OptionalEnumPicker(title: "Completeness", selection: $model.draft.completeness)
             OptionalEnumPicker(title: "Condition", selection: $model.draft.condition)
@@ -257,7 +253,12 @@ struct GameFormView: View {
                     .textInputAutocapitalization(.characters)
                     .autocorrectionDisabled()
             }
-            OptionalDatePicker(title: "Purchase date", date: $model.draft.purchaseDate)
+            OptionalDatePicker(
+                title: "Purchase date",
+                date: $model.draft.purchaseDate,
+                range: Validation.purchaseDatePickerRange,
+                error: errors[.purchaseDate]
+            )
             ValidatedRow(error: errors[.purchasePlace]) {
                 LabeledTextField(title: "Purchased from", text: $model.draft.purchasePlace, prompt: "Shop, flea market…")
             }
@@ -287,7 +288,7 @@ struct GameFormView: View {
 
     private var coverPreviewURL: URL? {
         guard !model.draft.coverImageUrl.isBlank, errors[.coverImageUrl] == nil else { return nil }
-        return URL(string: model.draft.coverImageUrl.trimmingCharacters(in: .whitespacesAndNewlines))
+        return URL(string: model.draft.coverImageUrl.normalizedText)
     }
 
     private func priceField(_ title: String, text: Binding<String>, field: GameDraft.Field) -> some View {
@@ -340,7 +341,24 @@ struct GameFormView: View {
 
 // MARK: - Pieces
 
-/// Picker for an optional enum with a "not specified" option.
+/// Picker for a required enum. A value this app version doesn't know is offered as "Unknown" while it is
+/// the current one, so picking any other value is a change.
+private struct EnumPicker<Value: APIEnum>: View {
+    let title: String
+    @Binding var selection: Value
+
+    var body: some View {
+        Picker(title, selection: $selection) {
+            ForEach(Value.allCases, id: \.self) { Text($0.label).tag($0) }
+            if !selection.isKnown {
+                Text(selection.label).tag(selection)
+            }
+        }
+    }
+}
+
+/// Picker for an optional enum with a "not specified" option. A value this app version doesn't know is
+/// offered as "Unknown" while it is the current one.
 private struct OptionalEnumPicker<Value: APIEnum>: View {
     let title: String
     @Binding var selection: Value?
@@ -350,6 +368,9 @@ private struct OptionalEnumPicker<Value: APIEnum>: View {
             Text("Not specified").tag(Value?.none)
             ForEach(Value.allCases, id: \.self) { value in
                 Text(value.label).tag(Value?.some(value))
+            }
+            if let selection, !selection.isKnown {
+                Text(selection.label).tag(Value?.some(selection))
             }
         }
     }

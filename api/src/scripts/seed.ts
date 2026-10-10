@@ -1,5 +1,6 @@
 /**
- * Creates (or recreates) a demo account with a sample collection.
+ * Creates (or recreates) a demo account with a sample collection. Its password
+ * is published, so it runs only with NODE_ENV=development or test.
  * Usage: npm run build && npm run db:seed
  */
 import 'dotenv/config';
@@ -647,26 +648,38 @@ const games: SaveGameDto[] = [
   },
 ];
 
+if (!['development', 'test'].includes(process.env.NODE_ENV ?? '')) {
+  console.error(
+    `Refusing to seed with NODE_ENV=${process.env.NODE_ENV ?? '(unset)'}: the demo account's ` +
+      'password is public. Run it with NODE_ENV=development (or test) if you really want it.',
+  );
+  process.exit(1);
+}
+
 const prisma = new PrismaClient({
   adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL }),
 });
 
 try {
-  await prisma.user.deleteMany({ where: { email: DEMO_EMAIL } });
-  const user = await prisma.user.create({
-    data: {
-      email: DEMO_EMAIL,
-      displayName: 'Demo Collector',
-      passwordHash: await new PasswordService().hash(DEMO_PASSWORD),
-      gamesVersion: games.length,
-    },
-  });
-  await prisma.game.createMany({
-    data: games.map((game, index) => ({
-      ...toGameData(game),
-      userId: user.id,
-      version: index + 1,
-    })),
+  const passwordHash = await new PasswordService().hash(DEMO_PASSWORD);
+  // All or nothing: a failure must not leave the demo account half-created.
+  await prisma.$transaction(async (tx) => {
+    await tx.user.deleteMany({ where: { email: DEMO_EMAIL } });
+    const user = await tx.user.create({
+      data: {
+        email: DEMO_EMAIL,
+        displayName: 'Demo Collector',
+        passwordHash,
+        gamesVersion: games.length,
+      },
+    });
+    await tx.game.createMany({
+      data: games.map((game, index) => ({
+        ...toGameData(game),
+        userId: user.id,
+        version: index + 1,
+      })),
+    });
   });
   console.log(
     `Seeded ${games.length} games for ${DEMO_EMAIL} / ${DEMO_PASSWORD}`,

@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { ApiException } from '../common/api-exception.js';
+import { accountDeleted, ApiException } from '../common/api-exception.js';
 import { ErrorCode } from '../common/error-codes.js';
 import { type Game, Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -15,15 +15,25 @@ import {
 import {
   buildGameOrderBy,
   buildGameWhere,
+  TOMBSTONE_DATA,
   toGameData,
   toGamePatchData,
 } from './games.query.js';
+import { formatCursor, parseCursor } from './sync-cursor.js';
 
 const notFound = () =>
   new ApiException(
     HttpStatus.NOT_FOUND,
     ErrorCode.GAME_NOT_FOUND,
     'Game not found',
+  );
+
+/** Not even a tombstone: the apps push such a game again as a new one. */
+const unknown = () =>
+  new ApiException(
+    HttpStatus.NOT_FOUND,
+    ErrorCode.GAME_UNKNOWN,
+    'Game not found; the server has no record of it',
   );
 
 const isPrismaError = (e: unknown, code: string) =>
@@ -86,11 +96,15 @@ export class GamesService {
     };
   }
 
+  /**
+   * A deleted game (or someone else's) is `GAME_NOT_FOUND`; an id the server
+   * has no record of is `GAME_UNKNOWN`, as for `update`: an app undoing a
+   * rejected change must not remove a game the server merely lost.
+   */
   async get(userId: string, id: string): Promise<GameDto> {
-    const game = await this.prisma.game.findFirst({
-      where: { id, userId, deletedAt: null },
-    });
-    if (!game) throw notFound();
+    const game = await this.prisma.game.findUnique({ where: { id } });
+    if (!game) throw unknown();
+    if (game.userId !== userId || game.deletedAt) throw notFound();
     return GameDto.from(game);
   }
 
@@ -136,22 +150,50 @@ export class GamesService {
     return this.update(userId, id, toGamePatchData(dto));
   }
 
-  /** Deleting a game that is already deleted succeeds, so clients can retry safely. */
+  /**
+   * Deleting a game that is already deleted succeeds, so clients can retry
+   * safely. So does deleting an id the server has never seen: it stores a
+   * tombstone, because a create with that id may still be on its way (a retry
+   * of a request that timed out on the device) and must not bring the game
+   * back when it arrives.
+   */
   async remove(userId: string, id: string): Promise<void> {
     try {
       await this.write(userId, (tx, version) =>
         tx.game.update({
           where: { id, userId, deletedAt: null },
-          data: { deletedAt: new Date(), version },
+          data: { ...TOMBSTONE_DATA, deletedAt: new Date(), version },
         }),
       );
     } catch (e) {
       if (!isRecordNotFound(e)) throw e;
-      const tombstone = await this.prisma.game.findFirst({
-        where: { id, userId },
-        select: { id: true },
+      const existing = await this.prisma.game.findUnique({
+        where: { id },
+        select: { userId: true },
       });
-      if (!tombstone) throw notFound();
+      if (!existing) await this.storeTombstone(userId, id);
+      // Someone else's game looks non-existent; the user's own is a tombstone already.
+      else if (existing.userId !== userId) throw notFound();
+    }
+  }
+
+  private async storeTombstone(userId: string, id: string): Promise<void> {
+    try {
+      await this.write(userId, (tx, version) =>
+        tx.game.create({
+          data: {
+            ...TOMBSTONE_DATA,
+            id,
+            userId,
+            deletedAt: new Date(),
+            version,
+          },
+        }),
+      );
+    } catch (e) {
+      // The create arrived at the same moment: delete what it stored.
+      if (!isUniqueViolation(e)) throw e;
+      await this.remove(userId, id);
     }
   }
 
@@ -160,13 +202,21 @@ export class GamesService {
     userId: string,
     query: GameChangesQueryDto,
   ): Promise<GameChangesDto> {
-    const since = query.cursor === undefined ? 0 : Number(query.cursor);
-    const { gamesVersion } = await this.prisma.user.findUniqueOrThrow({
+    const cursor = parseCursor(query.cursor);
+    const since = cursor.version;
+    const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      select: { gamesVersion: true },
+      select: { gamesVersion: true, syncEpoch: true },
     });
-    if (since > gamesVersion) {
-      // The cursor is from a newer state than the database, e.g. after a restore from a backup.
+    if (!user) throw accountDeleted();
+    const { gamesVersion, syncEpoch } = user;
+    if (
+      (query.cursor !== undefined && cursor.epoch !== syncEpoch) ||
+      since > gamesVersion
+    ) {
+      // The cursor is from another state of the database, e.g. from before a restore from a
+      // backup (the epoch is replaced then) or from a newer state than the restored one. A
+      // cursor without an epoch (older app versions) cannot be checked, so it is not trusted.
       throw new ApiException(
         HttpStatus.GONE,
         ErrorCode.SYNC_RESET_REQUIRED,
@@ -185,7 +235,7 @@ export class GamesService {
         .filter((game) => !game.deletedAt)
         .map((game) => GameDto.from(game)),
       deletedIds: page.filter((game) => game.deletedAt).map((game) => game.id),
-      cursor: String(page.at(-1)?.version ?? since),
+      cursor: formatCursor(syncEpoch, page.at(-1)?.version ?? since),
       hasMore: rows.length > query.limit,
     };
   }
@@ -204,8 +254,14 @@ export class GamesService {
       );
       return GameDto.from(game);
     } catch (e) {
-      if (isRecordNotFound(e)) throw notFound();
-      throw e;
+      if (!isRecordNotFound(e)) throw e;
+      const existing = await this.prisma.game.findUnique({
+        where: { id },
+        select: { id: true },
+      });
+      // Deleted (or someone else's), or never seen – e.g. created after the backup the
+      // server was restored from.
+      throw existing ? notFound() : unknown();
     }
   }
 
@@ -220,11 +276,12 @@ export class GamesService {
     run: (tx: Prisma.TransactionClient, version: number) => Promise<T>,
   ): Promise<T> {
     return this.prisma.$transaction(async (tx) => {
-      const [{ gamesVersion }] = await tx.$queryRaw<{ gamesVersion: number }[]>`
+      const [user] = await tx.$queryRaw<{ gamesVersion: number }[]>`
         UPDATE "users" SET "gamesVersion" = "gamesVersion" + 1
         WHERE "id" = ${userId}::uuid
         RETURNING "gamesVersion"`;
-      return run(tx, gamesVersion);
+      if (!user) throw accountDeleted();
+      return run(tx, user.gamesVersion);
     });
   }
 

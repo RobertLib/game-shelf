@@ -230,11 +230,43 @@ class GameListViewModelTest {
             advanceUntilIdle()
             assertEquals(GameListEvent.ShowMessage(UiText(R.string.game_deleted)), awaitItem())
 
-            sync.events.emit(SyncEvent.ChangesRejected)
+            sync.eventChannel.send(SyncEvent.ChangesRejected)
             advanceUntilIdle()
-            assertEquals(GameListEvent.ShowMessage(UiText(R.string.error_changes_rejected)), awaitItem())
+            assertEquals(GameListEvent.ChangesRejected, awaitItem())
         }
+        // Reported again (e.g. after a restart) until the screen has shown it.
+        assertEquals(0, sync.changesRejectedShownCount)
+        viewModel.onChangesRejectedShown()
+        assertEquals(1, sync.changesRejectedShownCount)
         assertEquals(listOf("banjo", "Zelda"), viewModel.uiState.value.titles)
+    }
+
+    @Test
+    fun `changes rejected before the list opened are reported when it opens`() = runTest {
+        val sync = FakeSyncController()
+        // A run at app start, before any screen was shown.
+        sync.eventChannel.send(SyncEvent.ChangesRejected)
+
+        val viewModel = viewModel(FakeGamesRepository(games), sync)
+
+        viewModel.events.test {
+            advanceUntilIdle()
+            assertEquals(GameListEvent.ChangesRejected, awaitItem())
+        }
+    }
+
+    @Test
+    fun `a barcode scanned from the list opens the new game form through an event`() = runTest {
+        val viewModel = viewModel(FakeGamesRepository(games))
+        advanceUntilIdle()
+
+        // The scanner reports to the ViewModel, which outlives an activity recreated while the scanner is open:
+        // the event waits for the (new) screen to collect it.
+        viewModel.onBarcodeScanned("045496420055")
+
+        viewModel.events.test {
+            assertEquals(GameListEvent.AddScannedGame("045496420055"), awaitItem())
+        }
     }
 
     @Test

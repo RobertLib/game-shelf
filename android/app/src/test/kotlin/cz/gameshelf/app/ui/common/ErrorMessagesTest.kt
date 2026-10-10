@@ -24,7 +24,11 @@ class ErrorMessagesTest {
             api(ErrorCode.INVALID_CURRENT_PASSWORD) to R.string.error_invalid_current_password,
             api(ErrorCode.VALIDATION_FAILED) to R.string.error_validation_failed,
             api(ErrorCode.TOO_MANY_REQUESTS, 429) to R.string.error_too_many_requests,
+            // A 429 as well, but a different message.
+            api(ErrorCode.LOOKUP_QUOTA_EXCEEDED, 429) to R.string.error_lookup_quota_exceeded,
+            api(ErrorCode.ACCOUNT_DELETED, 401) to R.string.error_account_deleted,
             api(ErrorCode.GAME_NOT_FOUND, 404) to R.string.error_game_not_found,
+            api(ErrorCode.LOOKUP_UNAVAILABLE, 503) to R.string.error_lookup_unavailable,
             AppError.Network to R.string.error_network,
         )
         expected.forEach { (error, messageRes) -> assertEquals(error.toString(), UiText(messageRes), error.toUiText()) }
@@ -66,8 +70,30 @@ class ErrorMessagesTest {
     }
 
     @Test
-    fun `unparseable error body keeps the status with an unknown code`() {
-        assertEquals(AppError.Api(502, ErrorCode.UNKNOWN), httpError(502, "<html>Bad gateway</html>").toAppError())
+    fun `an unknown code is still an API error`() {
+        val body = """{"statusCode":402,"code":"PAYMENT_REQUIRED","message":"Pay","details":["plan"]}"""
+
+        assertEquals(AppError.Api(402, ErrorCode.UNKNOWN, listOf("plan")), httpError(402, body).toAppError())
+        assertEquals(AppError.Api(422, ErrorCode.UNKNOWN), httpError(422, """{"code":"SOMETHING_NEW"}""").toAppError())
+    }
+
+    @Test
+    fun `a body without a string code did not come from the API`() {
+        listOf(
+            "<html>Bad gateway</html>",
+            "",
+            "Forbidden",
+            """{"statusCode":403,"message":"Forbidden"}""",
+            """{"statusCode":404,"code":404,"message":"Not found"}""",
+            """{"statusCode":404,"code":null,"message":"Not found"}""",
+            """["GAME_NOT_FOUND"]""",
+        ).forEach { body -> assertEquals(body, AppError.Http(404), httpError(404, body).toAppError()) }
+    }
+
+    @Test
+    fun `errors without an API body are generic, except rate limiting`() {
+        assertEquals(UiText(R.string.error_unknown), AppError.Http(502).toUiText())
+        assertEquals(UiText(R.string.error_too_many_requests), AppError.Http(429).toUiText())
     }
 
     @Test

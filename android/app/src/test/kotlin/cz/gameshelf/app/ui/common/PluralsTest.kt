@@ -3,11 +3,14 @@ package cz.gameshelf.app.ui.common
 import android.app.Application
 import cz.gameshelf.app.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import java.time.Duration
+import java.time.Instant
 
 /** SDK 34 is the newest Robolectric sandbox that runs on JDK 17; plural rules do not differ by API level. */
 @RunWith(RobolectricTestRunner::class)
@@ -44,6 +47,34 @@ class PluralsTest {
         assertEquals("3 unsynced changes", unsynced(3))
         assertEquals("1 change hasn't been synced yet. It will be lost if you sign out now.", warning(1))
         assertEquals("3 changes haven't been synced yet. They will be lost if you sign out now.", warning(3))
+    }
+
+    @Test
+    fun `relative times come from the app's own strings`() {
+        val now = Instant.parse("2026-10-10T12:00:00Z")
+        fun ago(elapsed: Duration) = relativeTime(now - elapsed, now)?.resolve(resources)
+
+        assertEquals("Just now", ago(Duration.ofSeconds(59)))
+        // A time slightly ahead of the device's clock.
+        assertEquals("Just now", ago(Duration.ofSeconds(-30)))
+        assertEquals("1 minute ago", ago(Duration.ofMinutes(1)))
+        assertEquals("5 minutes ago", ago(Duration.ofMinutes(5)))
+        assertEquals("59 minutes ago", ago(Duration.ofMinutes(60).minusSeconds(1)))
+        assertEquals("1 hour ago", ago(Duration.ofHours(1)))
+        assertEquals("2 hours ago", ago(Duration.ofHours(2).plusMinutes(59)))
+        assertEquals("1 day ago", ago(Duration.ofDays(1)))
+        assertEquals("6 days ago", ago(Duration.ofDays(7).minusSeconds(1)))
+        // From a week on, the date is shown.
+        assertNull(ago(Duration.ofDays(7)))
+    }
+
+    @Test
+    @Config(qualifiers = "cs-rCZ")
+    fun `relative times are English also on a device in another language`() {
+        val resources = RuntimeEnvironment.getApplication().resources
+        val now = Instant.parse("2026-10-10T12:00:00Z")
+
+        assertEquals("3 days ago", relativeTime(now - Duration.ofDays(3), now)?.resolve(resources))
     }
 
     @Test

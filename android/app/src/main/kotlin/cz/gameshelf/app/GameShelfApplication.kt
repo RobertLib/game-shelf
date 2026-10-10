@@ -4,9 +4,6 @@ import android.app.Application
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
-import coil3.network.okhttp.OkHttpNetworkFetcherFactory
-import coil3.request.crossfade
-import coil3.util.DebugLogger
 import cz.gameshelf.app.di.AppContainer
 
 class GameShelfApplication : Application(), SingletonImageLoader.Factory {
@@ -19,10 +16,6 @@ class GameShelfApplication : Application(), SingletonImageLoader.Factory {
         container = AppContainer(this)
     }
 
-    override fun newImageLoader(context: PlatformContext): ImageLoader =
-        ImageLoader.Builder(context)
-            .components { add(OkHttpNetworkFetcherFactory(callFactory = { container.imageHttpClient })) }
-            .crossfade(true)
-            .apply { if (BuildConfig.DEBUG) logger(DebugLogger()) }
-            .build()
+    /** The container's, so that wiping the local data also empties its caches. */
+    override fun newImageLoader(context: PlatformContext): ImageLoader = container.imageLoader
 }

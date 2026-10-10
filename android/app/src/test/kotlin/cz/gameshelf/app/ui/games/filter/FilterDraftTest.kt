@@ -51,7 +51,7 @@ class FilterDraftTest {
         val draft = FilterDraft(
             releaseYearFrom = "2005",
             releaseYearTo = "1995",
-            purchasePriceMin = "10,555",
+            purchasePriceMin = "10,5555",
             purchaseDateFrom = LocalDate.of(2024, 2, 1),
             purchaseDateTo = LocalDate.of(2024, 1, 1),
         )
@@ -62,6 +62,16 @@ class FilterDraftTest {
         assertEquals(UiText(R.string.validation_range), errors.purchaseDate)
         assertNull(errors.estimatedValue)
         assertNull(draft.toFilter())
+    }
+
+    @Test
+    fun `price bounds read decimals and grouping the same way in every locale`() {
+        val filter = FilterDraft(purchasePriceMin = "1,000", purchasePriceMax = "1.299,50", estimatedValueMax = "2 500,5")
+            .toFilter()!!
+
+        assertEquals(BigDecimal("1000"), filter.purchasePriceMin)
+        assertEquals(BigDecimal("1299.50"), filter.purchasePriceMax)
+        assertEquals(BigDecimal("2500.5"), filter.estimatedValueMax)
     }
 
     @Test

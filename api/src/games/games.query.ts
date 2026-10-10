@@ -1,5 +1,9 @@
-import { CollectionStatus, GameFormat } from '../generated/prisma/enums.js';
-import type { Prisma } from '../generated/prisma/client.js';
+import {
+  CollectionStatus,
+  GameFormat,
+  Platform,
+} from '../generated/prisma/enums.js';
+import type { Game, Prisma } from '../generated/prisma/client.js';
 import type { SaveGameDto, UpdateGameDto } from './dto/save-game.dto.js';
 import {
   type GameSortField,
@@ -28,8 +32,15 @@ const NULLABLE_SORT_FIELDS = new Set<GameSortField>([
   'rating',
 ]);
 
+/**
+ * Prisma passes `contains` and case-insensitive `equals` values into LIKE /
+ * ILIKE patterns as they are, so `%`, `_` and `\` would act as wildcards (or
+ * break the query). Backslash is PostgreSQL's default LIKE escape character.
+ */
+export const escapeLike = (value: string) => value.replace(/[\\%_]/g, '\\$&');
+
 const contains = (value: string) => ({
-  contains: value,
+  contains: escapeLike(value),
   mode: 'insensitive' as const,
 });
 
@@ -65,7 +76,7 @@ export function buildGameWhere(
   if (genres) {
     and.push({
       OR: genres.map((genre) => ({
-        genre: { equals: genre, mode: 'insensitive' },
+        genre: { equals: escapeLike(genre), mode: 'insensitive' },
       })),
     });
   }
@@ -162,6 +173,56 @@ export function toGameData(dto: SaveGameDto) {
     notes: dto.notes ?? null,
   } satisfies Omit<Prisma.GameUncheckedCreateInput, 'userId' | 'version'>;
 }
+
+type OptionalColumn = {
+  [K in keyof Game]-?: null extends Game[K] ? K : never;
+}[keyof Game];
+
+/**
+ * What deleting a game writes besides `deletedAt`: the tombstone only tells the
+ * change feed that the game is gone and is never shown, so it keeps none of the
+ * collector's data – the title is emptied, the other required columns get
+ * fixed values and every optional column is cleared.
+ */
+export const TOMBSTONE_DATA: Record<
+  Exclude<OptionalColumn, 'deletedAt'>,
+  null
+> & {
+  title: '';
+  platform: typeof Platform.OTHER;
+  status: typeof CollectionStatus.OWNED;
+  format: typeof GameFormat.PHYSICAL;
+  quantity: 1;
+  currency: 'CZK';
+  favorite: false;
+} = {
+  title: '',
+  platform: Platform.OTHER,
+  status: CollectionStatus.OWNED,
+  format: GameFormat.PHYSICAL,
+  quantity: 1,
+  currency: 'CZK',
+  favorite: false,
+  region: null,
+  edition: null,
+  completeness: null,
+  condition: null,
+  playStatus: null,
+  genre: null,
+  developer: null,
+  publisher: null,
+  releaseYear: null,
+  barcode: null,
+  productCode: null,
+  purchasePrice: null,
+  purchaseDate: null,
+  purchasePlace: null,
+  estimatedValue: null,
+  storageLocation: null,
+  rating: null,
+  coverImageUrl: null,
+  notes: null,
+};
 
 /** Maps a partial update to column values: only the fields present in the body change. */
 export function toGamePatchData(dto: UpdateGameDto) {

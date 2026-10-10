@@ -34,6 +34,7 @@ import cz.gameshelf.app.domain.model.Condition
 import cz.gameshelf.app.domain.model.GameFormat
 import cz.gameshelf.app.domain.model.PlayStatus
 import cz.gameshelf.app.domain.model.Region
+import cz.gameshelf.app.domain.model.SaveGameRequest
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.asString
 import cz.gameshelf.app.ui.common.labelRes
@@ -243,6 +244,8 @@ fun GameFormContent(
                 value = form.purchaseDate,
                 onValueChange = { d -> onFormChange { it.copy(purchaseDate = d) } },
                 label = stringResource(R.string.field_purchase_date),
+                yearRange = SaveGameRequest.PURCHASE_YEARS,
+                error = error(GameField.PURCHASE_DATE)?.asString(),
                 modifier = Modifier.fillMaxWidth(),
             )
             FormTextField(

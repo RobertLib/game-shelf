@@ -20,11 +20,29 @@ Numbers, prices and dates are formatted with the **device locale** (prices alway
 - Auth: `POST auth/register|login` → `AuthResponse { accessToken, expiresIn, refreshToken, user }`.
   Send `Authorization: Bearer <accessToken>`. On **401 from any authenticated call**, call `POST auth/refresh`
   with the refresh token (single-flight: concurrent 401s must share one refresh), store the new pair
-  (refresh tokens are single-use and rotate) and retry the original request once. If refresh fails → clear the
-  session and show the sign-in screen.
+  (refresh tokens are single-use and rotate) and retry the original request once. If the API rejects the
+  refresh (a `4xx` with an API error body, except `408` / `429`) → clear the session and show the sign-in screen. Apply the result
+  of a refresh (new tokens or a rejection) only while the session still holds the refresh token that was
+  sent; a sign-out or a new sign-in during the refresh wins.
+  Any other failure of a refresh – network, timeout, `5xx`, a response without an API error body (a proxy's
+  page) – keeps the session and the old refresh token: if the lost request did reach the server, the API
+  still accepts the old token for a short while (`REFRESH_TOKEN_REUSE_GRACE_SECONDS`, 2 minutes by default)
+  as long as the successor it issued has not been used. Likewise a `401` **without** an API error body did
+  not come from the API: it is an error of that request, never a reason to end the session.
+  `401 ACCOUNT_DELETED` (the account was deleted, e.g. on another device; the API answers it to any access
+  token of a deleted account, expired or not) is never refreshed: the app signs out and wipes the local
+  data exactly like a sign-out.
+  Store a new pair before using it. When a refreshed pair cannot be stored (e.g. the Keychain / Keystore
+  fails), the session ends as if it had expired – local data and unsynced changes are kept – rather than
+  continue with tokens a restart would lose: the old refresh token, sent again after the grace period,
+  would count as stolen and sign the user out on every device. A sign-in whose session cannot be stored
+  shows an error.
 - `POST auth/change-password` returns a new `AuthResponse` – store it (all other sessions are revoked).
 - `POST auth/logout { refreshToken }` on sign-out (ignore failures), then clear the local session.
 - `DELETE auth/me { password }` deletes the account (required by App Store guideline 5.1.1(v)).
+- When the app ends the session by itself, the sign-in screen says why above the form, until the user
+  signs in or leaves the screen: "Your session has expired. Please sign in again." (the refresh was
+  rejected) or "This account has been deleted." (`401 ACCOUNT_DELETED`).
 - The list, its filters and the facets are computed **on the device** from the synced collection,
   with the same semantics as `GET games` and `GET games/facets` (the apps do not call those endpoints):
   - search `q`: every whitespace-separated word must be contained (case-insensitive) in the title,
@@ -43,11 +61,16 @@ Numbers, prices and dates are formatted with the **device locale** (prices alway
 - Sync (details in [offline-sync.md](offline-sync.md)): `GET games/changes?cursor=…` (change feed),
   `POST games` with a client-generated `id` (`CreateGameRequest`), `PATCH games/{id}` with only the
   changed fields (`UpdateGameRequest`), `DELETE games/{id}` (idempotent), `GET games/{id}`.
-  `PUT games/{id}` (full replacement) still exists for older app versions.
+  `PUT games/{id}` (full replacement) still exists for older app versions. `404 GAME_UNKNOWN` (the
+  server has no record of the game, see offline-sync.md) is handled by the sync engine and never shown.
+- API responses are never stored in an HTTP cache on the device (they contain the collection, which
+  must be gone after sign-out); the API sends `Cache-Control: no-store`, and the apps' API clients
+  use no cache either.
 - Barcode lookup: `GET lookup/barcode/{barcode}` → `BarcodeLookup` (title, platform, region, edition,
   genre, developer, publisher, release year, cover URL and the `sources` to show as attribution).
   `404 BARCODE_NOT_FOUND` = no database knows the code (not an error for the user),
-  `503 LOOKUP_UNAVAILABLE` = the database can't be reached now. Unlike the collection it needs a
+  `503 LOOKUP_UNAVAILABLE` = the database can't be reached now, `429 LOOKUP_QUOTA_EXCEEDED` = the user
+  has used up today's lookups (until midnight UTC). Unlike the collection it needs a
   connection; nothing is saved by it.
 - Game search: `GET lookup/games?q=…&platform=…` → `GameSearchResponse { items, sources }`, at most 20
   `GameSearchResult`s (IGDB id, title, platforms, genre, developer, publisher, release year, cover URL),
@@ -64,16 +87,142 @@ Numbers, prices and dates are formatted with the **device locale** (prices alway
 | INVALID_CURRENT_PASSWORD | Current password is incorrect. (in the delete-account dialog: Incorrect password.) |
 | VALIDATION_FAILED | Please check the entered data. (+ `details` if useful) |
 | TOO_MANY_REQUESTS | Too many attempts. Please try again in a moment. |
+| LOOKUP_QUOTA_EXCEEDED | You've reached today's limit of barcode lookups. Try again tomorrow. |
+| ACCOUNT_DELETED | This account has been deleted. |
 | GAME_NOT_FOUND | Game not found. |
 | LOOKUP_UNAVAILABLE | The game database isn't available right now. Try again later. |
 | network failure / timeout | Can't connect to the server. Check your connection. |
 | a synced change was rejected (see offline-sync.md) | Some changes were rejected by the server and have been undone. |
 | anything else | Something went wrong. Please try again. |
 
-Validate on the client before sending (same rules as the API): email format, password 8–128 chars,
-password confirmation must match, title required (≤200), platform required, release year 1950–2100,
-rating 1–10, quantity 1–999, prices ≥ 0 with max 2 decimals, barcode 8–14 digits, cover URL http(s),
-currency 3 letters (default CZK).
+## Validation
+
+The apps validate on the client with **exactly the rules of the API**. This matters: a game is saved
+locally first, and a change the API rejects later is undone by the sync engine, or – for a new game –
+stays on the device unsynced (see [offline-sync.md](offline-sync.md)), so anything the form lets
+through must be accepted by the API.
+
+- Text is normalized before it is validated and saved: U+0000 is removed wherever it occurs
+  (PostgreSQL cannot store it; the API removes it from every text it receives too), then the text is
+  trimmed of white space – every Unicode white space character **and U+FEFF** (zero width no-break
+  space, a pasted byte order mark), which JavaScript's `trim()` on the API removes as well. Kotlin's
+  `isWhitespace()` and Swift's `.whitespacesAndNewlines` don't include U+FEFF, so add it. A blank
+  optional text is sent as `null`. The same applies to the search texts sent to the API.
+- **Lengths are counted in Unicode code points** (Kotlin `codePointCount`, Swift `unicodeScalars.count`,
+  JS `[...s].length`): `"😀"` is 1, `"🇨🇿"` is 2, a decomposed `"é"` (`e` + U+0301) is 2. Shortening a
+  text never cuts a code point (a surrogate pair) in half.
+- Account: password 8–128, display name ≤ 100, password confirmation must match; a new password must
+  differ from the current one ("The new password must be different from the current one.").
+- Email when **creating an account**: ≤ 254 characters, no character outside the Basic Multilingual
+  Plane (above U+FFFF, e.g. emoji), the part before the `@` at most 64 bytes and the part after it at
+  most 254 bytes in UTF-8, and it matches the email pattern below. Every address it accepts is accepted
+  by the API's `IsEmail` (validator.js), which the API checks on sign-up.
+- Email when **signing in**: required, ≤ 254 characters, contains `@`. No other format check – any
+  existing account must be able to sign in, and the API answers `INVALID_CREDENTIALS` for an address
+  it doesn't know, whatever its format.
+- Game:
+
+  | field | rule |
+  |---|---|
+  | title | required, ≤ 200 |
+  | platform | required |
+  | edition, genre, developer, publisher, purchase place, storage location | ≤ 100 |
+  | product code | ≤ 50 |
+  | notes | ≤ 5000 |
+  | barcode | 8–14 ASCII digits |
+  | release year | 1950–2100 |
+  | quantity | 1–999 |
+  | rating | 1–10 |
+  | purchase price, estimated value | 0 – 9 999 999 999.99, at most 2 decimal places (as typed: `1,500` is fine, `1,5000` is not) |
+  | currency | 3 letters A–Z (case-insensitive, stored upper-case; historic codes such as DEM or SKK are fine), default CZK |
+  | purchase date | 1900-01-01 – 2100-12-31 (the date pickers offer only this range) |
+  | cover image URL | ≤ 2048 and matches the cover URL pattern below |
+
+- **Values the user did not change are not validated.** An edit sends only the changed fields, so a
+  value that came from the server (e.g. an enum value this app version doesn't know, shown as
+  "unknown") never blocks saving an edit of another field, and is never sent back.
+
+### Email pattern
+
+Applied to the trimmed address. `\p{L}` and `\p{N}` are Unicode letters and digits; `\uXXXX` is one
+UTF-16 code unit (all ranges are inside the BMP, so engines that count code points agree):
+
+```
+^(?!.*[\uFF01-\uFF5E])[A-Za-z0-9!#$%&'*+/=?^_`{|}~\u00A1-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF-]+(?:\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~\u00A1-\uD7FF\uF900-\uFDCF\uFDF0-\uFFEF-]+)*@(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]{0,61}[\p{L}\p{N}])?\.)+(?:\p{L}{2,63}|[Xx][Nn]--[A-Za-z0-9-]{0,58}[A-Za-z0-9])$
+```
+
+The part before the `@` is dot-separated runs of the characters validator.js allows (no leading,
+trailing or doubled dot); the domain is labels of letters, digits and inner hyphens (no `_`, at most 63
+characters each), ending in a top-level domain of at least 2 letters or an IDN (`xn--…`); full-width
+characters (U+FF01–U+FF5E) are not allowed anywhere.
+
+| valid | invalid |
+|---|---|
+| `jan.novak@example.com` | `a..b@example.com` |
+| `a+b@example.co.uk` | `.a@example.com`, `a.@example.com` |
+| `o'brien@example.ie` | `a@exa_mple.com` |
+| `jiří@příklad.cz` | `a@-example.com`, `a@example-.com` |
+| `user@пример.рф` | `a@example..com`, `a@example.com.` |
+| `user@example.xn--p1ai` | `a(b)@example.com`, `a b@example.com` |
+| `a@b.cd` | `a@example.c`, `a@example`, `a@1.2.3.4` |
+
+### Cover URL pattern
+
+ASCII only, identical on all three platforms (write character classes out, never `\d`, `\s` or `\S`,
+whose meaning differs between regex engines):
+
+```
+^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
+```
+
+| valid | invalid |
+|---|---|
+| `https://example.com/a.png` | `ftp://example.com/a.png` |
+| `HTTPS://Example.COM/A.png` | `example.com/a.png` |
+| `http://localhost/x.png` | `https://` |
+| `https://nas/cover.jpg` | `https://-example.com/a.png` |
+| `https://example.com:8443/a?b=c#d` | `https://example.com./a.png` |
+| `https://example.com?x=1` | `https://exa mple.com/a.png` |
+| `https://img.example.co.uk/a_b/%C3%A9.jpg` | `https://example.com/a b.png` |
+| | `https://example.com/é.png` |
+| | `https://user:pw@example.com/a.png` |
+| | `https://my_host/a.png` |
+| | `https://[::1]/a.png` |
+| | `https://example.com:123456/a.png` |
+
+### Decimal input
+
+Prices and the price filter bounds accept a decimal point or a decimal comma and grouping, the same
+way in every locale:
+
+1. Remove all whitespace (including no-break spaces U+00A0, U+202F and U+2009).
+2. What remains may only contain digits, `.` and `,`, with at least one digit.
+3. Find the decimal separator:
+   - both `.` and `,` occur → the one that occurs **last** is the decimal separator (it must occur
+     once); the other one is grouping;
+   - only one of them occurs, more than once → it is grouping (no decimals);
+   - only one of them occurs, once → it is the decimal separator, **unless exactly 3 digits follow it**,
+     then it is grouping (prices never have 3 decimals, so `1,500` and `1.500` are 1500).
+4. With grouping, the part before the decimal separator must be 1–3 digits, not starting with `0`,
+   followed by groups of exactly 3 digits (`12,345,678`); otherwise the input is invalid (so `0,500`
+   and `0.001` are invalid, not 500 and 1).
+5. Either the whole part or the decimal part may be empty, not both (`,5` = 0.5, `5,` = 5).
+6. "At most 2 decimal places" counts the decimal digits **as typed** (`1,50` is fine, `1,500` is
+   1500, `1,5000` has 4 decimal places).
+
+| input | value | | input | value |
+|---|---|---|---|---|
+| `1299.90` | 1299.90 | | `1,000` | 1000 |
+| `1299,9` | 1299.9 | | `2.500` | 2500 |
+| `1 299,90` | 1299.90 | | `1.234.567,89` | 1234567.89 |
+| `1,299.90` | 1299.90 | | `12,345,678` | 12345678 |
+| `1.299,90` | 1299.90 | | `,5` | 0.5 |
+| `1,5` | 1.5 | | `5,` | 5 |
+| `1,50` | 1.50 | | `1,5000` | 1.5000 (rejected: 4 decimals) |
+| `1.23,45` | invalid | | `1,2,3` | invalid |
+| `1.2.3` | invalid | | `.` | invalid |
+| `1,2.3` | invalid | | `12a` | invalid |
+| `0,500` | invalid | | `0.001` | invalid |
 
 ## Screens
 
@@ -83,7 +232,8 @@ currency 3 letters (default CZK).
    - Header shows the result count ("132 games", "1 game") and, at its end, the sync status:
      a small progress indicator while syncing (accessibility label "Syncing…"), "Offline" with a
      cloud-off icon when the server can't be reached, otherwise "3 unsynced changes" while changes
-     wait to be pushed; nothing when everything is synced.
+     wait to be pushed; nothing when everything is synced. The header is shown also when the list
+     is empty (no results, or the last game deleted while offline), so the sync status stays visible.
    - Search field (debounce ~350 ms).
    - Sort menu: a "Group by platform" toggle first (on by default), then field + ascending/descending.
      Filter button with a badge = number of active filters.
@@ -136,6 +286,11 @@ currency 3 letters (default CZK).
      "Searching the game database".
    - Inline validation messages, ask before discarding unsaved changes ("Discard changes?").
      Saving is local and works offline; after save, go back – the list and detail update by themselves.
+   - When a sync deletes the game while it is being edited (deleted on another device), the form stays
+     open with the user's input; saving then shows "Game not found." and does not recreate the game.
+   - Cover image URLs starting with `http://` are valid, but the apps load images only over HTTPS
+     (Android's cleartext policy, iOS App Transport Security): an `http://` cover is loaded from the
+     same address with `https://`.
 7. **Profile & settings** – email, display name; "Collection" (number of games and platforms, from the
    local data); "Sync":
    - Status: "Syncing…" / "Offline" / "3 unsynced changes" / "All changes synced" / "Not synced yet"
@@ -149,9 +304,15 @@ currency 3 letters (default CZK).
      synced yet. It will be lost if you sign out now." / "3 changes haven't been synced yet. They will
      be lost if you sign out now." with the destructive button "Sign out anyway"; otherwise "Your
      collection stays on the server. You can sign in again at any time." with "Sign out".
-   - Signing out and deleting the account remove the collection from the device. When the session
-     expires on its own, the local data and unsynced changes are kept for the next sign-in of the same
-     user.
+   - Signing out and deleting the account remove the collection from the device, and deleting the
+     account also from the user's other devices (at their next request, see `ACCOUNT_DELETED`). When the
+     session expires on its own, the local data and unsynced changes are kept for the next sign-in of the
+     same user. Once the user has confirmed, signing out and deleting the account finish even when the
+     screen is closed right away; if the local data cannot be wiped, or the app is killed before it is,
+     the session is cleared and the data wiped at the next start before anything is shown. The wipe
+     also empties the app's cache of cover images.
+   - Relative times ("5 minutes ago") and every other text come from the app's own (English) strings,
+     never from the device language, so the screen is never mixed-language.
 
 ## Scanning a barcode
 
@@ -290,3 +451,8 @@ Developer, Publisher, Release year, Barcode (EAN/UPC), Product code, Quantity, P
 Purchased from, Estimated value, Currency, Storage location, Rating, Favorite, Cover image URL, Notes.
 
 Unknown enum values coming from a newer API must not crash decoding (map to an "unknown"/OTHER fallback).
+They are shown as "Unknown" (platform and region as "Other") – in the detail, and in the edit form as the
+picker's current value until the user picks another one – and the stored game keeps the value the API
+sent. An edit never sends it back unless the user changed that field (see Validation); pushing the
+whole game again (when the server lost it) sends it unchanged (see [offline-sync.md](offline-sync.md)).
+After an app update the collection is pulled again.

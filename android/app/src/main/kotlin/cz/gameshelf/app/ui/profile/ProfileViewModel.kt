@@ -73,7 +73,10 @@ sealed interface ProfileEvent {
     data class ShowMessage(val message: UiText) : ProfileEvent
 }
 
-/** Signing out or deleting the account ends the session; the app root then shows the login. */
+/**
+ * Signing out or deleting the account ends the session; the app root then shows the login. Both finish in the
+ * app scope ([AuthRepository]), also when this screen is closed right after the user confirmed.
+ */
 class ProfileViewModel(
     private val authRepository: AuthRepository,
     gamesRepository: GamesRepository,
@@ -144,7 +147,7 @@ class ProfileViewModel(
         if (form.isSubmitting) return
         val validated = form.copy(
             currentPasswordError = AuthValidation.requiredPassword(form.currentPassword),
-            newPasswordError = AuthValidation.newPassword(form.newPassword),
+            newPasswordError = AuthValidation.changedPassword(form.currentPassword, form.newPassword),
             confirmationError = AuthValidation.passwordConfirmation(form.newPassword, form.confirmation),
         )
         if (listOfNotNull(validated.currentPasswordError, validated.newPasswordError, validated.confirmationError).isNotEmpty()) {
@@ -211,7 +214,7 @@ class ProfileViewModel(
 
     fun logout() {
         _uiState.update { it.copy(showLogoutConfirmation = false) }
-        viewModelScope.launch { authRepository.logout() }
+        authRepository.logout()
     }
 
     companion object {

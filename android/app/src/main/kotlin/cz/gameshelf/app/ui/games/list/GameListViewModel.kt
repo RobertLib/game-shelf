@@ -22,6 +22,7 @@ import cz.gameshelf.app.domain.model.PlatformSection
 import cz.gameshelf.app.domain.model.SortOrder
 import cz.gameshelf.app.ui.common.UiText
 import cz.gameshelf.app.ui.common.appContainer
+import cz.gameshelf.app.ui.common.normalizedText
 import cz.gameshelf.app.ui.common.toUiText
 import cz.gameshelf.app.ui.games.filter.FilterDraft
 import kotlinx.coroutines.CoroutineDispatcher
@@ -69,7 +70,7 @@ class GameListViewModel(
         val debouncedSearch = searchInput
             // Clearing the search applies immediately; typing waits for a pause.
             .debounce { if (it.isBlank()) 0L else searchDebounceMillis }
-            .map { it.trim() }
+            .map { it.normalizedText() }
             .distinctUntilChanged()
         val request = combine(
             debouncedSearch,
@@ -103,11 +104,21 @@ class GameListViewModel(
         viewModelScope.launch {
             sync.events.collect { event ->
                 when (event) {
-                    SyncEvent.ChangesRejected ->
-                        _events.send(GameListEvent.ShowMessage(UiText(R.string.error_changes_rejected)))
+                    SyncEvent.ChangesRejected -> _events.send(GameListEvent.ChangesRejected)
                 }
             }
         }
+    }
+
+    /** The screen showed [GameListEvent.ChangesRejected]; until then it is reported again, also after a restart. */
+    fun onChangesRejectedShown() = sync.onChangesRejectedShown()
+
+    /**
+     * "Scan barcode" read [barcode]: the new game form opens with it. The scanner reports here, not to the screen that
+     * opened it, so a result that arrives after the activity was recreated meanwhile still opens the form.
+     */
+    fun onBarcodeScanned(barcode: String) {
+        _events.trySend(GameListEvent.AddScannedGame(barcode))
     }
 
     fun onSearchQueryChange(value: String) {

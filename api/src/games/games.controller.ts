@@ -81,8 +81,8 @@ export class GamesController {
     description:
       'Games created, changed or deleted after `cursor`, oldest change first. Start without a ' +
       'cursor, then keep calling with the returned `cursor` while `hasMore` is true. ' +
-      '410 SYNC_RESET_REQUIRED means the cursor cannot be continued: drop the synced data and ' +
-      'start again without a cursor.',
+      '410 SYNC_RESET_REQUIRED means the cursor cannot be continued: start again without a ' +
+      'cursor and push back the local games the full pull does not bring (see offline-sync.md).',
   })
   @ApiOkResponse({ type: GameChangesDto })
   @ApiErrorResponses(BAD_REQUEST, GONE)
@@ -95,7 +95,13 @@ export class GamesController {
 
   @Get(':id')
   @IdParam()
-  @ApiOperation({ operationId: 'getGame', summary: 'Get one game' })
+  @ApiOperation({
+    operationId: 'getGame',
+    summary: 'Get one game',
+    description:
+      '404 GAME_NOT_FOUND: the game was deleted; 404 GAME_UNKNOWN: the server has no record of ' +
+      'it (e.g. it was restored from an older backup).',
+  })
   @ApiOkResponse({ type: GameDto })
   @ApiErrorResponses(BAD_REQUEST, NOT_FOUND)
   get(
@@ -132,7 +138,9 @@ export class GamesController {
     operationId: 'updateGame',
     summary: 'Replace a game',
     description:
-      'Full replacement: omitted optional fields are cleared, omitted defaults are reset.',
+      'Full replacement: omitted optional fields are cleared, omitted defaults are reset. ' +
+      '404 GAME_NOT_FOUND: the game was deleted; 404 GAME_UNKNOWN: the server has no record of ' +
+      'it (e.g. it was restored from an older backup), create it again.',
   })
   @ApiOkResponse({ type: GameDto })
   @ApiErrorResponses(BAD_REQUEST, NOT_FOUND)
@@ -150,7 +158,9 @@ export class GamesController {
     operationId: 'patchGame',
     summary: 'Change some fields of a game',
     description:
-      'Only the fields present in the body change; `null` clears an optional field.',
+      'Only the fields present in the body change; `null` clears an optional field. ' +
+      '404 GAME_NOT_FOUND: the game was deleted; 404 GAME_UNKNOWN: the server has no record of ' +
+      'it (e.g. it was restored from an older backup), create it again.',
   })
   @ApiOkResponse({ type: GameDto })
   @ApiErrorResponses(BAD_REQUEST, NOT_FOUND)
@@ -168,7 +178,10 @@ export class GamesController {
   @ApiOperation({
     operationId: 'deleteGame',
     summary: 'Remove a game from the collection',
-    description: 'Deleting a game that is already deleted also succeeds.',
+    description:
+      'Deleting a game that is already deleted also succeeds, and so does deleting an id the ' +
+      'server has never seen: a tombstone is stored, so a create with that id arriving later is ' +
+      "answered 404. 404 only for another user's game.",
   })
   @ApiNoContentResponse()
   @ApiErrorResponses(BAD_REQUEST, NOT_FOUND)

@@ -1,5 +1,5 @@
 import { HttpStatus, Injectable } from '@nestjs/common';
-import { ApiException } from '../common/api-exception.js';
+import { accountDeleted, ApiException } from '../common/api-exception.js';
 import { ErrorCode } from '../common/error-codes.js';
 import { Prisma, type User } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
@@ -72,10 +72,7 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string): Promise<AuthResponseDto> {
-    const { userId, tokens } = await this.tokens.rotate(refreshToken);
-    const user = await this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-    });
+    const { user, tokens } = await this.tokens.rotate(refreshToken);
     return { ...tokens, user: UserDto.from(user) };
   }
 
@@ -84,9 +81,7 @@ export class AuthService {
   }
 
   async me(userId: string): Promise<UserDto> {
-    return UserDto.from(
-      await this.prisma.user.findUniqueOrThrow({ where: { id: userId } }),
-    );
+    return UserDto.from(await this.findUser(userId));
   }
 
   /** Changes the password, signs out every other session and returns fresh tokens. */
@@ -104,14 +99,15 @@ export class AuthService {
       );
     }
 
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        passwordHash: await this.passwords.hash(dto.newPassword),
-        passwordChangedAt: new Date(),
-      },
+    const passwordHash = await this.passwords.hash(dto.newPassword);
+    const user = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: { passwordHash, passwordChangedAt: new Date() },
+      });
+      await this.tokens.revokeAll(userId, tx);
+      return updated;
     });
-    await this.tokens.revokeAll(userId);
     return this.respond(user);
   }
 
@@ -125,9 +121,7 @@ export class AuthService {
     userId: string,
     password: string,
   ): Promise<void> {
-    const user = await this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-    });
+    const user = await this.findUser(userId);
     if (!(await this.passwords.verify(password, user.passwordHash))) {
       throw new ApiException(
         HttpStatus.BAD_REQUEST,
@@ -137,8 +131,15 @@ export class AuthService {
     }
   }
 
+  /** The signed-in user; `ACCOUNT_DELETED` when the account was deleted while the request was on its way. */
+  private async findUser(userId: string): Promise<User> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!user) throw accountDeleted();
+    return user;
+  }
+
   private async respond(user: User): Promise<AuthResponseDto> {
-    const tokens = await this.tokens.issue(user.id);
+    const tokens = await this.tokens.issue(user);
     return { ...tokens, user: UserDto.from(user) };
   }
 }

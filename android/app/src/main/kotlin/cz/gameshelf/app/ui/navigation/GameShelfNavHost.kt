@@ -33,8 +33,11 @@ fun GameShelfNavHost(
                 GameListRoute(
                     onGameClick = { id -> entry.ifResumed { navController.navigate(GameDetail(id)) } },
                     onAddGame = { entry.ifResumed { navController.navigate(GameEdit()) } },
-                    // Not `ifResumed`: the result arrives while the scanner activity is still closing.
-                    onAddScannedGame = { barcode -> navController.navigate(GameEdit(barcode = barcode)) },
+                    // The scanned code arrives while the scanner activity is still closing; the event waits until the
+                    // list is resumed (see ObserveAsEvents).
+                    onAddScannedGame = { barcode ->
+                        entry.ifResumed { navController.navigate(GameEdit(barcode = barcode)) }
+                    },
                     onOpenProfile = { entry.ifResumed { navController.navigate(Profile) } },
                 )
             }
@@ -54,7 +57,11 @@ fun GameShelfNavHost(
     }
 }
 
-/** Ignores repeated taps that would otherwise navigate twice while a transition is running. */
+/**
+ * Ignores repeated taps that would otherwise navigate twice while a transition is running. ViewModel events (Close,
+ * Deleted, a scanned barcode) are delivered only while the screen is resumed (see ObserveAsEvents), so they always
+ * pass.
+ */
 private inline fun NavBackStackEntry.ifResumed(action: () -> Unit) {
     if (lifecycle.currentState == Lifecycle.State.RESUMED) action()
 }

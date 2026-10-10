@@ -1,7 +1,8 @@
 import Foundation
 
 // Enums without an OTHER value get an explicit `unknown` case for values from a
-// newer API. It is excluded from `allCases`, so it never shows up in pickers.
+// newer API, shown as "Unknown" (docs/mobile-spec.md, "Labels"). It is excluded from
+// `allCases`, so a picker offers it only as the current value of a game that has one.
 
 enum CollectionStatus: String, APIEnum {
     case owned = "OWNED"
@@ -23,7 +24,7 @@ enum CollectionStatus: String, APIEnum {
         case .lent: "Lent out"
         case .forSale: "For sale"
         case .sold: "Sold"
-        case .unknown: "Unknown status"
+        case .unknown: "Unknown"
         }
     }
 }
@@ -40,7 +41,7 @@ enum GameFormat: String, APIEnum {
         switch self {
         case .physical: "Physical"
         case .digital: "Digital"
-        case .unknown: "Unknown format"
+        case .unknown: "Unknown"
         }
     }
 }
@@ -96,7 +97,7 @@ enum Completeness: String, APIEnum {
         case .gameAndManual: "Game & manual"
         case .loose: "Loose"
         case .boxOnly: "Box only"
-        case .unknown: "Unknown completeness"
+        case .unknown: "Unknown"
         }
     }
 }
@@ -121,7 +122,7 @@ enum Condition: String, APIEnum {
         case .good: "Good"
         case .fair: "Fair"
         case .poor: "Poor"
-        case .unknown: "Unknown condition"
+        case .unknown: "Unknown"
         }
     }
 }
@@ -142,7 +143,7 @@ enum PlayStatus: String, APIEnum {
         case .playing: "Playing"
         case .completed: "Completed"
         case .abandoned: "Abandoned"
-        case .unknown: "Unknown play status"
+        case .unknown: "Unknown"
         }
     }
 }

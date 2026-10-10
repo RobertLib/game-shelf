@@ -23,7 +23,7 @@ data class SyncStatus(
 }
 
 sealed interface SyncEvent {
-    /** Changes the server rejected permanently were undone. */
+    /** Changes the server rejected permanently were undone; reported until [SyncController.onChangesRejectedShown]. */
     data object ChangesRejected : SyncEvent
 }
 
@@ -31,7 +31,15 @@ sealed interface SyncEvent {
 interface SyncController {
     val status: StateFlow<SyncStatus>
 
+    /**
+     * Events waiting to be shown. They are stored, so they wait for a screen also across a restart: a run may
+     * report rejected changes before any screen shows (app start, a run in the background). Rejections of
+     * several runs before anybody looked are reported once.
+     */
     val events: Flow<SyncEvent>
+
+    /** The UI has shown [SyncEvent.ChangesRejected]: it is not reported again until other changes are rejected. */
+    fun onChangesRejectedShown()
 
     /** Runs a sync soon (or once more after the running one); failures are retried automatically. */
     fun requestSync()

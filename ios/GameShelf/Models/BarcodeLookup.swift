@@ -25,7 +25,7 @@ enum Barcode {
     /// Drops the zeros that pad a UPC-A (12 digits) to EAN-13 or GTIN-14, so that every form of one
     /// code is equal – the camera reads UPC-A as EAN-13 with a leading zero. Same rule as the API.
     static func normalized(_ code: String) -> String {
-        var normalized = Substring(code.trimmingCharacters(in: .whitespacesAndNewlines))
+        var normalized = Substring(code.normalizedText)
         while normalized.count > 12, normalized.first == "0" {
             normalized = normalized.dropFirst()
         }

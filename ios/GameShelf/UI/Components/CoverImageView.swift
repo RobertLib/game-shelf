@@ -1,6 +1,7 @@
 import SwiftUI
 
 /// Game cover loaded from `coverImageUrl`, with a placeholder showing the platform's short name.
+/// Covers are loaded only over HTTPS (``Foundation/URL/upgradedToHTTPS``).
 struct CoverImageView: View {
     let url: URL?
     let platform: Platform
@@ -10,7 +11,7 @@ struct CoverImageView: View {
         ZStack {
             placeholder
             if let url {
-                AsyncImage(url: url, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
+                AsyncImage(url: url.upgradedToHTTPS, transaction: Transaction(animation: .easeOut(duration: 0.2))) { phase in
                     if let image = phase.image {
                         image
                             .resizable()
@@ -39,6 +40,18 @@ struct CoverImageView: View {
                     .lineLimit(1)
                     .padding(4)
             }
+    }
+}
+
+extension URL {
+    /// An `http://` URL (in any letter case) loaded from the same address with `https://`: an `http://`
+    /// cover is valid, but App Transport Security blocks it (docs/mobile-spec.md, Screen 6).
+    var upgradedToHTTPS: URL {
+        guard scheme?.lowercased() == "http",
+              var components = URLComponents(url: self, resolvingAgainstBaseURL: false)
+        else { return self }
+        components.scheme = "https"
+        return components.url ?? self
     }
 }
 

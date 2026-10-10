@@ -29,18 +29,23 @@
     <string name="error_unknown">Something went wrong. Please try again.</string>
     <string name="error_changes_rejected">Some changes were rejected by the server and have been undone.</string>
     <string name="error_lookup_unavailable">The game database isn\'t available right now. Try again later.</string>
+    <string name="error_lookup_quota_exceeded">You\'ve reached today\'s limit of barcode lookups. Try again tomorrow.</string>
+    <string name="error_account_deleted">This account has been deleted.</string>
 
     <!-- Client-side validation -->
     <string name="validation_required">This field is required.</string>
     <string name="validation_email">Enter a valid email address.</string>
     <string name="validation_password_length">Password must be 8–128 characters long.</string>
     <string name="validation_password_mismatch">Passwords don\'t match.</string>
+    <string name="validation_password_unchanged">The new password must be different from the current one.</string>
     <string name="validation_platform_required">Choose a platform.</string>
     <string name="validation_year">Enter a year between 1950 and 2100.</string>
+    <string name="validation_purchase_date">Enter a date between 1900 and 2100.</string>
     <string name="validation_quantity">Enter a whole number from 1 to 999.</string>
     <string name="validation_price">Enter a non-negative number with at most 2 decimal places.</string>
+    <string name="validation_price_too_large">Enter at most %1$s.</string>
     <string name="validation_barcode">The barcode must have 8–14 digits.</string>
-    <string name="validation_url">Enter an address starting with http:// or https://.</string>
+    <string name="validation_url">Enter a valid web address starting with http:// or https://.</string>
     <string name="validation_currency">Enter a three-letter currency code, e.g. CZK.</string>
     <string name="validation_range">The “from” value is greater than the “to” value.</string>
     <string name="validation_fix_errors">Please fix the highlighted fields.</string>
@@ -52,6 +57,7 @@
     <string name="field_password">Password</string>
     <string name="action_login">Sign in</string>
     <string name="login_no_account">Don\'t have an account? Create one</string>
+    <string name="login_session_expired">Your session has expired. Please sign in again.</string>
     <string name="password_show">Show password</string>
     <string name="password_hide">Hide password</string>
     <string name="register_title">Create account</string>
@@ -260,6 +266,18 @@
     <string name="sync_last_synced_label">Last synced</string>
     <string name="sync_never">Never</string>
     <string name="sync_just_now">Just now</string>
+    <plurals name="time_minutes_ago">
+        <item quantity="one">%d minute ago</item>
+        <item quantity="other">%d minutes ago</item>
+    </plurals>
+    <plurals name="time_hours_ago">
+        <item quantity="one">%d hour ago</item>
+        <item quantity="other">%d hours ago</item>
+    </plurals>
+    <plurals name="time_days_ago">
+        <item quantity="one">%d day ago</item>
+        <item quantity="other">%d days ago</item>
+    </plurals>
     <string name="action_sync_now">Sync now</string>
     <string name="profile_security">Account &amp; security</string>
     <string name="action_change_password">Change password</string>
