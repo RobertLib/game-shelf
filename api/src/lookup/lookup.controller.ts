@@ -7,6 +7,10 @@ import {
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { ApiErrorResponses } from '../common/api-error-responses.decorator.js';
+import {
+  type AuthUser,
+  CurrentUser,
+} from '../common/current-user.decorator.js';
 import { BarcodeLookupService } from './barcode-lookup.service.js';
 import { BarcodeLookupDto, BarcodeParamDto } from './dto/barcode-lookup.dto.js';
 import {
@@ -41,8 +45,11 @@ export class LookupController {
     summary: 'Find a game by the barcode on its box',
     description:
       'Looks the EAN / UPC up in external databases and returns details to prefill a new game ' +
-      'with; nothing is saved. 404 `BARCODE_NOT_FOUND`: the code is not known. ' +
-      '503 `LOOKUP_UNAVAILABLE`: the database cannot be reached or its daily limit is used up.',
+      'with; nothing is saved. 404 `BARCODE_NOT_FOUND`: the code is not known (also when the ' +
+      'check digit of a 12–14 digit code is wrong). 429 `TOO_MANY_REQUESTS`: too many calls, ' +
+      'or the user has used up their daily number of lookups in the barcode database (results ' +
+      'found before do not count). 503 `LOOKUP_UNAVAILABLE`: the database cannot be reached or ' +
+      'its daily limit is used up.',
   })
   @ApiOkResponse({ type: BarcodeLookupDto })
   @ApiErrorResponses(
@@ -51,8 +58,11 @@ export class LookupController {
     TOO_MANY_REQUESTS,
     SERVICE_UNAVAILABLE,
   )
-  barcode(@Param() { barcode }: BarcodeParamDto): Promise<BarcodeLookupDto> {
-    return this.lookup.lookup(barcode);
+  barcode(
+    @CurrentUser() user: AuthUser,
+    @Param() { barcode }: BarcodeParamDto,
+  ): Promise<BarcodeLookupDto> {
+    return this.lookup.lookup(barcode, user.id);
   }
 
   /** The apps search as the user types (debounced), so the limit is higher. */

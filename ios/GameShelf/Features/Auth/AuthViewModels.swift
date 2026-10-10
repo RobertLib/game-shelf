@@ -42,10 +42,10 @@ final class RegisterViewModel {
 
     var emailError: String? { hasAttemptedSubmit ? Validation.email(email) : nil }
 
-    var displayNameError: String? { Validation.maxLength(displayName, 100) }
+    var displayNameError: String? { Validation.displayName(displayName) }
 
     var passwordError: String? {
-        hasAttemptedSubmit || password.count > Validation.passwordLength.upperBound ? Validation.newPassword(password) : nil
+        hasAttemptedSubmit || password.codePointCount > Validation.passwordLength.upperBound ? Validation.newPassword(password) : nil
     }
 
     var confirmationError: String? {

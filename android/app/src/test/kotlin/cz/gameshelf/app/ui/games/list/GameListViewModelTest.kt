@@ -230,11 +230,25 @@ class GameListViewModelTest {
             advanceUntilIdle()
             assertEquals(GameListEvent.ShowMessage(UiText(R.string.game_deleted)), awaitItem())
 
-            sync.events.emit(SyncEvent.ChangesRejected)
+            sync.eventChannel.send(SyncEvent.ChangesRejected)
             advanceUntilIdle()
             assertEquals(GameListEvent.ShowMessage(UiText(R.string.error_changes_rejected)), awaitItem())
         }
         assertEquals(listOf("banjo", "Zelda"), viewModel.uiState.value.titles)
+    }
+
+    @Test
+    fun `changes rejected before the list opened are reported when it opens`() = runTest {
+        val sync = FakeSyncController()
+        // A run at app start, before any screen was shown.
+        sync.eventChannel.send(SyncEvent.ChangesRejected)
+
+        val viewModel = viewModel(FakeGamesRepository(games), sync)
+
+        viewModel.events.test {
+            advanceUntilIdle()
+            assertEquals(GameListEvent.ShowMessage(UiText(R.string.error_changes_rejected)), awaitItem())
+        }
     }
 
     @Test

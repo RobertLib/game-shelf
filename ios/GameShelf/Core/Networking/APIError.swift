@@ -27,16 +27,35 @@ enum APIErrorCode: String, Codable, Sendable {
 }
 
 /// `ErrorResponse` from the API contract.
-struct ErrorResponse: Codable, Hashable, Sendable {
-    var statusCode: Int
+///
+/// A body is an *API error body* when it has a string `code` – also one this app version doesn't
+/// know (docs/offline-sync.md); the other fields are not needed to recognize it.
+struct ErrorResponse: Decodable, Hashable, Sendable {
+    var statusCode: Int?
     var code: APIErrorCode
-    var message: String
+    var message: String?
     var details: [String]?
+
+    private enum CodingKeys: String, CodingKey {
+        case statusCode, code, message, details
+    }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        code = try container.decode(APIErrorCode.self, forKey: .code)
+        statusCode = try? container.decodeIfPresent(Int.self, forKey: .statusCode)
+        message = try? container.decodeIfPresent(String.self, forKey: .message)
+        details = try? container.decodeIfPresent([String].self, forKey: .details)
+    }
 }
 
 enum APIError: Error, Hashable, Sendable {
-    /// The server answered with a non-2xx status.
+    /// The API answered with a non-2xx status and an API error body (``ErrorResponse``).
     case server(statusCode: Int, code: APIErrorCode, details: [String])
+    /// A non-2xx response without an API error body – an HTML page from a proxy, a `403` from a
+    /// firewall, a misrouted request. It did not come from the Game Shelf API, so it says nothing
+    /// about the request.
+    case http(statusCode: Int)
     /// The server could not be reached (offline, timeout, DNS, TLS, …).
     case network(URLError.Code)
     /// The response could not be decoded.
@@ -45,7 +64,10 @@ enum APIError: Error, Hashable, Sendable {
     case sessionExpired
 
     var statusCode: Int? {
-        if case .server(let statusCode, _, _) = self { statusCode } else { nil }
+        switch self {
+        case .server(let statusCode, _, _), .http(let statusCode): statusCode
+        case .network, .invalidResponse, .sessionExpired: nil
+        }
     }
 
     var code: APIErrorCode? {

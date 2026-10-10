@@ -6,11 +6,16 @@ It implements [`../docs/mobile-spec.md`](../docs/mobile-spec.md) against the RES
 
 ## Requirements
 
-- JDK 17
+- A JDK **17 or newer** to launch the Gradle wrapper (`JAVA_HOME`, or `java` on the `PATH`).
 - Android SDK with platform **API 37** (`compileSdk`/`targetSdk`) and build-tools 36+
-- `local.properties` with the SDK path (not in git), e.g. `sdk.dir=/Users/<you>/Library/Android/sdk`
+- `local.properties` with the SDK path (not in git), e.g. `sdk.dir=/Users/<you>/Library/Android/sdk`,
+  or the `ANDROID_HOME` environment variable
 
-No Gradle installation is needed – use the wrapper (`./gradlew`).
+No Gradle installation is needed – use the wrapper (`./gradlew`). It downloads Gradle itself, and Gradle
+runs the build on **JDK 25**, as pinned in `gradle/gradle-daemon-jvm.properties`: a JDK 25 installed on the
+machine is used when Gradle finds one, otherwise Gradle downloads one (from the URLs in that file, via the
+Foojay API) into `~/.gradle/jdks`. The first build therefore needs network access – for Gradle, the JDK and
+the dependencies; once they are cached, builds also work offline. The app itself is compiled for Java 17.
 
 ## Build and run
 
@@ -18,9 +23,11 @@ No Gradle installation is needed – use the wrapper (`./gradlew`).
 cd android
 ./gradlew assembleDebug            # debug APK in app/build/outputs/apk/debug/
 ./gradlew testDebugUnitTest        # unit tests
-./gradlew lint                     # Android Lint
+./gradlew lintDebug                # Android Lint
 ./gradlew installDebug             # install on a running emulator / connected device
 ```
+
+Debug builds, unit tests and lint – everything CI runs – work without the release property below.
 
 The debug build talks to the local API at `http://10.0.2.2:3000/api/v1/` (the host machine's
 `localhost:3000` as seen from the emulator), so start the API from `../api` first.
@@ -39,16 +46,18 @@ adb reverse tcp:3000 tcp:3000
 
 and temporarily change `debugApiBaseUrl` in `app/build.gradle.kts` to `http://localhost:3000/api/v1/`.
 
-## Pointing the release build to another API
+## Release builds
 
-The release build reads its base URL from the Gradle property `gameshelf.apiBaseUrl`
-(default `https://api.example.com/api/v1/`; it must end with a slash):
+The release build reads the API's base URL from the Gradle property `gameshelf.apiBaseUrl`, which is
+**required** (there is no default; it must end with a slash):
 
 ```bash
 ./gradlew assembleRelease -Pgameshelf.apiBaseUrl=https://games.example.org/api/v1/
 ```
 
-The property can also be set permanently in `~/.gradle/gradle.properties` or `android/gradle.properties`.
+Without it, packaging a release (`assembleRelease`, `bundleRelease`, `installRelease`, …) fails right away
+with a message saying so, instead of shipping an app that talks to a placeholder address. The property can
+also be set permanently in `~/.gradle/gradle.properties` or `android/gradle.properties`.
 The release build is minified with R8; signing is not configured in the repository.
 
 ## Architecture
@@ -72,17 +81,30 @@ The release build is minified with R8; signing is not configured in the reposito
   temporary failures with exponential backoff (2 s … 5 min) while in the foreground. The local data
   belongs to one user: signing in as someone else, signing out and deleting the account wipe it; an
   expired session keeps it. `SyncController` exposes the status (syncing / offline / unsynced
-  changes / last synced) and "changes rejected" events to the UI.
+  changes / last synced) and "changes rejected" events to the UI; such an event waits until a screen
+  receives it (e.g. when the run happened before the list was shown).
 - **Search, filters, sort and facets** are computed on the device (`domain/collection`) with the
   semantics of the API's `GET games` / `GET games/facets`, off the main thread.
 - **Auth repository** (`data/auth`) returns `ApiResult` with an `AppError`, which the UI maps to
   messages by error `code`.
 - **Networking**: Retrofit + OkHttp + kotlinx.serialization. `AuthInterceptor` adds the bearer token,
-  `TokenAuthenticator` refreshes the tokens on 401 (single-flight via a `Mutex`, one retry).
-  API enums tolerate unknown values (`OTHER`/`UNKNOWN`); money amounts are `BigDecimal`.
+  `TokenAuthenticator` refreshes the tokens on 401 (single-flight via a `Mutex`, one retry). The refresh
+  runs on the auth client, which has its own dispatcher, so it never waits for a slot held by the calls
+  blocked in the authenticator; its result is applied only while the session it started from is still
+  the current one. Debug builds log requests, but never the bodies of `auth/…` (passwords, tokens).
+  API enums tolerate unknown values (`OTHER`/`UNKNOWN`) and never send them back; after an app update
+  the collection is pulled again, so values an older version didn't know are stored properly.
+  Error responses without an API error body (a proxy's HTML page…) are temporary for the sync.
+  Money amounts are `BigDecimal`.
 - **Tokens** are stored in Preferences DataStore, encrypted with an AES/GCM key from the Android
-  Keystore; the file is excluded from backups and device transfers.
-- **Room schema** is exported to `app/schemas/` (baseline for future migrations).
+  Keystore; the file is excluded from backups and device transfers. A corrupted file or an unreadable
+  session means starting signed out.
+- **Room schema** is exported to `app/schemas/`; every version change comes with a `Migration`
+  (`GameShelfDatabase.MIGRATIONS`, tested against the exported schemas), never a destructive fallback.
+- **Validation** (`ui/games/edit/GameFormValidator`, `ui/auth/AuthValidation`, `ui/common/DecimalInput`)
+  follows the API's rules exactly (mobile-spec.md, "Validation"); an edit validates only the values the
+  user changed. The edit form and its initial state are kept in the `SavedStateHandle`, so an edit
+  survives process death.
 - **Barcode scanning** uses Google's code scanner from Play services (`ui/components/BarcodeScanner.kt`):
   Google's own full-screen camera UI, so the app needs no camera permission; the scanner module is
   downloaded with the app (`com.google.mlkit.vision.DEPENDENCIES` in the manifest). On an emulator use

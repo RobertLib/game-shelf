@@ -1,5 +1,9 @@
 import { ApiProperty, ApiSchema } from '@nestjs/swagger';
 import { Matches } from 'class-validator';
+import {
+  COVER_URL_MAX_LENGTH,
+  COVER_URL_PATTERN,
+} from '../../common/cover-url.js';
 import { Platform, Region } from '../../generated/prisma/enums.js';
 
 const nullableString = (maxLength: number, example: string) =>
@@ -52,7 +56,13 @@ export class BarcodeLookupDto {
   @ApiProperty({ type: 'integer', nullable: true, example: 2017 })
   releaseYear: number | null;
 
-  @ApiProperty({ type: String, format: 'uri', nullable: true })
+  @ApiProperty({
+    type: String,
+    format: 'uri',
+    nullable: true,
+    maxLength: COVER_URL_MAX_LENGTH,
+    pattern: COVER_URL_PATTERN,
+  })
   coverImageUrl: string | null;
 
   @ApiProperty({

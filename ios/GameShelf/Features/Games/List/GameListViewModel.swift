@@ -57,9 +57,14 @@ final class GameListViewModel {
     }
 
     /// Until the first complete sync, an empty collection shows loading (or the failure of that
-    /// sync) rather than the empty state.
+    /// sync) rather than the empty state. Local data that couldn't be opened shows its failure.
     var phase: Phase {
-        guard repository.isLoaded else { return .loading }
+        guard repository.isLoaded else {
+            if !isRetrying, let message = repository.loadError {
+                return .failed(message)
+            }
+            return .loading
+        }
         if repository.isEmpty, !syncStatus.hasCompletedInitialSync {
             if !isRetrying, let message = syncStatus.lastErrorMessage {
                 return .failed(message)
@@ -163,10 +168,14 @@ final class GameListViewModel {
         }
     }
 
-    /// "Try again" after the first sync failed.
+    /// "Try again" after the local data couldn't be opened or the first sync failed.
     func retry() async {
         isRetrying = true
         defer { isRetrying = false }
-        try? await sync.syncNow()
+        if repository.isLoaded {
+            try? await sync.syncNow()
+        } else {
+            await sync.retryActivation()
+        }
     }
 }

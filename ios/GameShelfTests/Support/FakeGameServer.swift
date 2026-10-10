@@ -14,6 +14,8 @@ actor FakeGameServer: GameAPI {
         var operation: Operation
         var gameID: Game.ID?
         var fields: Set<GameField> = []
+        /// The cursor a `changes` request continued from.
+        var cursor: String?
     }
 
     private(set) var games: [Game.ID: Game] = [:]
@@ -91,7 +93,7 @@ actor FakeGameServer: GameAPI {
     // MARK: GameAPI
 
     func changes(after cursor: String?, limit: Int) async throws -> GameChanges {
-        try await begin(Request(operation: .changes, gameID: nil))
+        try await begin(Request(operation: .changes, gameID: nil, cursor: cursor))
         let since = cursor.flatMap(Int.init) ?? 0
         let entries = feed
             .filter { $0.value.version > since }

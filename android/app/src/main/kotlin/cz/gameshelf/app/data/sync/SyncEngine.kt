@@ -18,17 +18,17 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.job
@@ -48,6 +48,9 @@ import java.time.Clock
  * Temporary failures are retried with exponential backoff while the app is in the foreground.
  * A run captures the signed-in user and re-checks it, together with the stored owner, at the start
  * of every write transaction, so it never writes data of a user who is no longer signed in.
+ *
+ * [appVersion] is the running app's `versionCode`: a cursor stored by another version is not continued
+ * (offline-sync.md, "After an app update").
  */
 class SyncEngine(
     private val api: GamesApi,
@@ -56,13 +59,15 @@ class SyncEngine(
     private val isConnected: StateFlow<Boolean>,
     private val isForeground: StateFlow<Boolean>,
     private val scope: CoroutineScope,
+    private val appVersion: Int,
     private val clock: Clock = Clock.systemUTC(),
 ) : SyncController {
 
     private val runState = MutableStateFlow(RunState())
 
-    private val _events = MutableSharedFlow<SyncEvent>(extraBufferCapacity = 8)
-    override val events: Flow<SyncEvent> = _events.asSharedFlow()
+    // Conflated: rejections reported by several runs before anybody looked are shown once.
+    private val _events = Channel<SyncEvent>(Channel.CONFLATED)
+    override val events: Flow<SyncEvent> = _events.receiveAsFlow()
 
     override val status: StateFlow<SyncStatus> = combine(
         runState,
@@ -117,7 +122,7 @@ class SyncEngine(
     suspend fun clearUserData() {
         cancelRuns()
         store.wipe(owner = null)
-        runState.value = RunState()
+        resetState()
     }
 
     /**
@@ -128,7 +133,13 @@ class SyncEngine(
         if (store.syncState().ownerUserId == userId) return
         cancelRuns()
         store.wipe(owner = userId)
+        resetState()
+    }
+
+    /** After the data was wiped: nothing about it (e.g. its rejected changes) is reported any more. */
+    private fun resetState() {
         runState.value = RunState()
+        _events.tryReceive() // conflated: holds at most one event
     }
 
     private suspend fun cancelRuns() {
@@ -230,7 +241,8 @@ class SyncEngine(
             outcome = RunOutcome.Failure(AppError.Unexpected)
         } finally {
             runState.update { it.finishedWith(outcome) }
-            if (run.rejectedChanges > 0) _events.tryEmit(SyncEvent.ChangesRejected)
+            // Kept until a screen receives it, also when none is shown now (app start, background).
+            if (run.rejectedChanges > 0) _events.trySend(SyncEvent.ChangesRejected)
         }
         return outcome
     }
@@ -246,23 +258,33 @@ class SyncEngine(
     }
 
     private suspend fun pushChange(run: Run, gameId: String): PushOutcome {
-        val attempt = store.transaction {
+        val prepared = store.transaction {
             run.checkOwner()
-            val change = store.pendingChange(gameId) ?: return@transaction null
+            val change = store.pendingChange(gameId) ?: return@transaction Prepared.NothingToSend
             val game = store.game(gameId)
-            val nothingToSend = when (change.kind) {
-                Kind.CREATE -> game == null
-                Kind.UPDATE -> game == null || change.fields.isEmpty()
-                Kind.DELETE -> false
+            when {
+                change.kind == Kind.UPDATE && change.fields.isEmpty() -> {
+                    store.removePendingChange(gameId)
+                    Prepared.NothingToSend
+                }
+                // Every deletion replaces the change with a DELETE, so the game's row is unreadable (or was
+                // lost): a local problem, never a sign that the game is gone on the server. Keep the change.
+                change.kind != Kind.DELETE && game == null -> Prepared.GameMissing
+                else -> {
+                    // From now on the server may have the change even if the response gets lost.
+                    if (!change.attempted) store.putPendingChange(change.copy(attempted = true))
+                    Prepared.Attempt(change, game)
+                }
             }
-            if (nothingToSend) {
-                store.removePendingChange(gameId)
-                return@transaction null
+        }
+        val attempt = when (prepared) {
+            Prepared.NothingToSend -> return PushOutcome.Done
+            Prepared.GameMissing -> {
+                Log.e(TAG, "Game $gameId has a pending change but is missing locally")
+                return PushOutcome.Failed(AppError.Unexpected)
             }
-            // From now on the server may have the change even if the response gets lost.
-            if (!change.attempted) store.putPendingChange(change.copy(attempted = true))
-            Attempt(change, game)
-        } ?: return PushOutcome.Done
+            is Prepared.Attempt -> prepared
+        }
 
         val change = attempt.change
         return when (change.kind) {
@@ -282,7 +304,8 @@ class SyncEngine(
             }
             Kind.DELETE -> {
                 val result = apiCall { api.deleteGame(gameId) }
-                if (result is ApiResult.Failure && !result.error.isNotFound()) {
+                // Already deleted counts as success – but only when the API itself says so.
+                if (result is ApiResult.Failure && !result.error.isGameNotFound()) {
                     onPushFailed(run, change, result.error)
                 } else {
                     store.transaction {
@@ -305,11 +328,12 @@ class SyncEngine(
         when {
             // Deleted locally meanwhile; the DELETE is pushed next time.
             current.kind == Kind.DELETE -> PushOutcome.Done
-            current.revision == sent.revision && response.alreadyExisted && sent.fields.isNotEmpty() -> {
-                // An earlier attempt created the game without us learning about it, so the fields
-                // edited after that attempt are not on the server yet: push them right away.
+            response.alreadyExisted && current.fields.isNotEmpty() -> {
+                // An earlier attempt created the game without us learning about it, so the fields edited
+                // after that attempt – also while this request was in flight – are not on the server yet:
+                // push just those, right away. All fields would overwrite what other devices changed since.
                 store.putPendingChange(current.copy(kind = Kind.UPDATE))
-                store.putGame(GameFields.merge(server, local, sent.fields))
+                store.putGame(GameFields.merge(server, local, current.fields))
                 PushOutcome.Again
             }
             current.revision == sent.revision -> {
@@ -345,23 +369,27 @@ class SyncEngine(
         else -> PushOutcome.Failed(error)
     }
 
-    /** A change the server rejected permanently is undone (offline-sync.md, "Rejected changes"). */
+    /**
+     * A change the server rejected permanently is undone (offline-sync.md, "Rejected changes"). A delete made
+     * after the rejected change is a new intention; it stays queued (the game is gone locally already).
+     */
     private suspend fun undo(run: Run, sent: PendingChange): PushOutcome {
         val id = sent.gameId
         if (sent.kind == Kind.CREATE) {
-            store.transaction {
+            val undone = store.transaction {
                 run.checkOwner()
+                if (store.pendingChange(id)?.kind == Kind.DELETE) return@transaction false
                 store.removePendingChange(id)
                 store.removeGame(id)
+                true
             }
-            run.rejectedChanges++
+            if (undone) run.rejectedChanges++
             return PushOutcome.Done
         }
         val restored = apiCall { api.game(id) }
-        if (restored is ApiResult.Failure && !restored.error.isNotFound()) return PushOutcome.Failed(restored.error)
+        if (restored is ApiResult.Failure && !restored.error.isGameNotFound()) return PushOutcome.Failed(restored.error)
         val undone = store.transaction {
             run.checkOwner()
-            // A delete made after the rejected update is a new intention; it stays queued.
             if (sent.kind != Kind.DELETE && store.pendingChange(id)?.kind == Kind.DELETE) return@transaction false
             store.removePendingChange(id)
             if (restored is ApiResult.Success) store.putGame(restored.value) else store.removeGame(id)
@@ -375,7 +403,11 @@ class SyncEngine(
     private suspend fun pull(run: Run): AppError? {
         var wasReset = false
         while (true) {
-            val cursor = store.syncState().cursor
+            val state = store.syncState()
+            // A cursor of another app version is not continued: that version may have stored values it didn't
+            // know as their fallbacks, so the whole collection is pulled again (offline-sync.md, "After an app
+            // update"). Unlike a reset, games and pending changes stay; the first page stores the new version.
+            val cursor = state.cursor.takeIf { state.appVersion == appVersion }
             val page = when (val result = apiCall { api.changes(cursor, PAGE_SIZE) }) {
                 is ApiResult.Success -> result.value
                 is ApiResult.Failure -> {
@@ -422,6 +454,7 @@ class SyncEngine(
             state.copy(
                 cursor = page.cursor,
                 lastSyncedAt = if (page.hasMore) state.lastSyncedAt else clock.instant(),
+                appVersion = appVersion,
             ),
         )
     }
@@ -437,8 +470,15 @@ class SyncEngine(
         var rejectedChanges = 0
     }
 
-    private class Attempt(val change: PendingChange, val game: Game?) {
-        fun requireGame(): Game = checkNotNull(game)
+    private sealed interface Prepared {
+        data object NothingToSend : Prepared
+
+        /** The game of a pending CREATE / UPDATE is not in the local store. */
+        data object GameMissing : Prepared
+
+        class Attempt(val change: PendingChange, val game: Game?) : Prepared {
+            fun requireGame(): Game = checkNotNull(game)
+        }
     }
 
     private class Upsert(val game: Game, val alreadyExisted: Boolean)
@@ -485,6 +525,7 @@ class SyncEngine(
         private const val TAG = "SyncEngine"
         private const val PAGE_SIZE = 500
         private const val HTTP_GONE = 410
+        private const val HTTP_REQUEST_TIMEOUT = 408
         private const val HTTP_TOO_MANY_REQUESTS = 429
         private const val INITIAL_BACKOFF_MILLIS = 2_000L
         private const val MAX_BACKOFF_MILLIS = 5 * 60_000L
@@ -494,13 +535,17 @@ class SyncEngine(
         internal fun backoffMillis(failedRuns: Int): Long =
             (INITIAL_BACKOFF_MILLIS shl (failedRuns - 1).coerceIn(0, 20)).coerceAtMost(MAX_BACKOFF_MILLIS)
 
-        private fun AppError.isNotFound() = this is AppError.Api && statusCode == HTTP_NOT_FOUND
+        /** Deleted (on another device). A `404` without this code says nothing about the game. */
+        private fun AppError.isGameNotFound() =
+            this is AppError.Api && statusCode == HTTP_NOT_FOUND && code == ErrorCode.GAME_NOT_FOUND
 
-        private fun AppError.isGameNotFound() = isNotFound() && (this as AppError.Api).code == ErrorCode.GAME_NOT_FOUND
-
-        /** `400`, `409` and other `4xx` except `401` / `429`: the change can never succeed. */
+        /**
+         * `4xx` except `401` / `408` / `429` with an API error body ([AppError.Api]): the change can never
+         * succeed. Without that body ([AppError.Http]) the response did not come from the API: temporary.
+         */
         private fun AppError.isPermanentRejection() = this is AppError.Api &&
-            statusCode in 400..499 && statusCode != HTTP_UNAUTHORIZED && statusCode != HTTP_TOO_MANY_REQUESTS
+            statusCode in 400..499 &&
+            statusCode !in setOf(HTTP_UNAUTHORIZED, HTTP_REQUEST_TIMEOUT, HTTP_TOO_MANY_REQUESTS)
 
         /** `410 SYNC_RESET_REQUIRED`, or a malformed cursor (`400 VALIDATION_FAILED`). */
         private fun AppError.requiresReset(cursor: String?) = this is AppError.Api && (

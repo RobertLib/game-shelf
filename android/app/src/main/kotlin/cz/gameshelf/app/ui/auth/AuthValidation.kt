@@ -2,8 +2,9 @@ package cz.gameshelf.app.ui.auth
 
 import cz.gameshelf.app.R
 import cz.gameshelf.app.ui.common.UiText
+import cz.gameshelf.app.ui.common.codePointLength
 
-/** Client-side checks mirroring the API rules for credentials. */
+/** Client-side checks with exactly the API rules for credentials; lengths count Unicode code points. */
 object AuthValidation {
     const val PASSWORD_MIN_LENGTH = 8
     const val PASSWORD_MAX_LENGTH = 128
@@ -21,7 +22,11 @@ object AuthValidation {
         if (value.isEmpty()) UiText(R.string.validation_required) else null
 
     fun newPassword(value: String): UiText? =
-        if (value.length !in PASSWORD_MIN_LENGTH..PASSWORD_MAX_LENGTH) UiText(R.string.validation_password_length) else null
+        if (value.codePointLength() !in PASSWORD_MIN_LENGTH..PASSWORD_MAX_LENGTH) {
+            UiText(R.string.validation_password_length)
+        } else {
+            null
+        }
 
     fun passwordConfirmation(password: String, confirmation: String): UiText? = when {
         confirmation.isEmpty() -> UiText(R.string.validation_required)
@@ -30,7 +35,7 @@ object AuthValidation {
     }
 
     fun displayName(value: String): UiText? =
-        if (value.trim().length > DISPLAY_NAME_MAX_LENGTH) {
+        if (value.trim().codePointLength() > DISPLAY_NAME_MAX_LENGTH) {
             UiText.plural(R.plurals.validation_too_long, DISPLAY_NAME_MAX_LENGTH)
         } else {
             null

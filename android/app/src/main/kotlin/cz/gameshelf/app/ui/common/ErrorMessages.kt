@@ -10,6 +10,8 @@ private const val HTTP_TOO_MANY_REQUESTS = 429
 fun AppError.toUiText(): UiText = when (this) {
     AppError.Network -> UiText(R.string.error_network)
     AppError.Unexpected -> UiText(R.string.error_unknown)
+    is AppError.Http ->
+        if (statusCode == HTTP_TOO_MANY_REQUESTS) UiText(R.string.error_too_many_requests) else UiText(R.string.error_unknown)
     is AppError.Api -> when {
         code == ErrorCode.INVALID_CREDENTIALS -> UiText(R.string.error_invalid_credentials)
         code == ErrorCode.EMAIL_ALREADY_REGISTERED -> UiText(R.string.error_email_already_registered)

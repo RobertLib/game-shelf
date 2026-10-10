@@ -9,19 +9,22 @@ import {
   IsBoolean,
   IsEnum,
   IsInt,
-  IsISO4217CurrencyCode,
   IsISO8601,
   IsNotEmpty,
   IsNumber,
   IsOptional,
   IsString,
-  IsUrl,
   IsUUID,
   Matches,
   Max,
-  MaxLength,
   Min,
 } from 'class-validator';
+import { MaxChars } from '../../common/char-length.decorator.js';
+import {
+  COVER_URL_MAX_LENGTH,
+  COVER_URL_PATTERN,
+  COVER_URL_REGEX,
+} from '../../common/cover-url.js';
 import { IsOptionalNonNull } from '../../common/optional-non-null.decorator.js';
 import { TrimToNull } from '../../common/transforms.js';
 import {
@@ -36,9 +39,12 @@ import {
 
 export const MAX_PRICE = 9_999_999_999.99;
 
+const CURRENCY_PATTERN = '^[A-Za-z]{3}$';
+
 /**
  * Body of POST /games and PUT /games/{id}. PUT replaces the whole record:
  * omitted optional fields are cleared and omitted defaults are reset.
+ * Text lengths are counted in Unicode code points, as the apps count them.
  */
 @ApiSchema({ name: 'SaveGameRequest' })
 export class SaveGameDto {
@@ -51,7 +57,7 @@ export class SaveGameDto {
   )
   @IsString()
   @IsNotEmpty()
-  @MaxLength(200)
+  @MaxChars(200)
   title: string;
 
   @ApiProperty({ enum: Platform, enumName: 'Platform', example: Platform.N64 })
@@ -90,7 +96,7 @@ export class SaveGameDto {
   @TrimToNull()
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   edition?: string | null;
 
   @ApiPropertyOptional({
@@ -129,7 +135,7 @@ export class SaveGameDto {
   @TrimToNull()
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   genre?: string | null;
 
   @ApiPropertyOptional({
@@ -141,7 +147,7 @@ export class SaveGameDto {
   @TrimToNull()
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   developer?: string | null;
 
   @ApiPropertyOptional({
@@ -153,7 +159,7 @@ export class SaveGameDto {
   @TrimToNull()
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   publisher?: string | null;
 
   @ApiPropertyOptional({
@@ -191,7 +197,7 @@ export class SaveGameDto {
   @TrimToNull()
   @IsOptional()
   @IsString()
-  @MaxLength(50)
+  @MaxChars(50)
   productCode?: string | null;
 
   @ApiPropertyOptional({
@@ -210,6 +216,8 @@ export class SaveGameDto {
     type: Number,
     nullable: true,
     minimum: 0,
+    maximum: MAX_PRICE,
+    description: 'At most 2 decimal places.',
     example: 1299.9,
   })
   @IsOptional()
@@ -241,13 +249,15 @@ export class SaveGameDto {
   @TrimToNull()
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   purchasePlace?: string | null;
 
   @ApiPropertyOptional({
     type: Number,
     nullable: true,
     minimum: 0,
+    maximum: MAX_PRICE,
+    description: 'At most 2 decimal places.',
     example: 2500,
   })
   @IsOptional()
@@ -259,15 +269,21 @@ export class SaveGameDto {
   @ApiPropertyOptional({
     minLength: 3,
     maxLength: 3,
+    pattern: CURRENCY_PATTERN,
     default: 'CZK',
-    description: 'ISO 4217 currency of purchasePrice and estimatedValue.',
+    description:
+      'Currency of purchasePrice and estimatedValue: 3 letters A–Z, case-insensitive, stored ' +
+      'upper-case. Usually an ISO 4217 code; historic codes such as DEM or SKK are accepted too.',
     example: 'CZK',
   })
+  // Only ASCII letters are upper-cased, so that e.g. "ı" cannot turn into "I".
   @Transform(({ value }: { value: unknown }) =>
-    typeof value === 'string' ? value.trim().toUpperCase() : value,
+    typeof value === 'string'
+      ? value.trim().replace(/[a-z]/g, (letter) => letter.toUpperCase())
+      : value,
   )
   @IsOptionalNonNull()
-  @IsISO4217CurrencyCode()
+  @Matches(/^[A-Z]{3}$/, { message: 'currency must be 3 letters A–Z' })
   currency?: string;
 
   @ApiPropertyOptional({
@@ -279,7 +295,7 @@ export class SaveGameDto {
   @TrimToNull()
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   storageLocation?: string | null;
 
   @ApiPropertyOptional({
@@ -304,19 +320,23 @@ export class SaveGameDto {
     type: String,
     format: 'uri',
     nullable: true,
-    maxLength: 2048,
+    maxLength: COVER_URL_MAX_LENGTH,
+    pattern: COVER_URL_PATTERN,
+    description: 'http(s) URL of ASCII characters; see `pattern`.',
   })
   @TrimToNull()
   @IsOptional()
-  @IsUrl({ protocols: ['http', 'https'], require_protocol: true })
-  @MaxLength(2048)
+  @Matches(COVER_URL_REGEX, {
+    message: 'coverImageUrl must be an http(s) URL',
+  })
+  @MaxChars(COVER_URL_MAX_LENGTH)
   coverImageUrl?: string | null;
 
   @ApiPropertyOptional({ type: String, nullable: true, maxLength: 5000 })
   @TrimToNull()
   @IsOptional()
   @IsString()
-  @MaxLength(5000)
+  @MaxChars(5000)
   notes?: string | null;
 }
 

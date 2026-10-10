@@ -26,7 +26,8 @@ This document is the contract between the API and the apps. The screens and text
 
 Every create, update and delete of a game gets the next number from a per-user counter
 (`games.version`, `users.gamesVersion`). Deleted games are kept as tombstones (`games.deletedAt`)
-so that other devices learn about the deletion.
+so that other devices learn about the deletion; a tombstone keeps only what the feed needs, its
+content (notes, prices, places …) is cleared.
 
 | param | |
 |---|---|
@@ -50,7 +51,10 @@ Response `GameChanges`:
 - Your own pushed changes come back in the feed too; applying them is harmless.
 - `410 SYNC_RESET_REQUIRED` – the cursor cannot be continued (e.g. the server was restored from a
   backup). Throw away all local games that have no pending change, forget the cursor and pull from
-  the beginning.
+  the beginning. The cursor carries a per-user *sync epoch*; after a restore the operator gives every
+  user a new one (`npm run db:reset-sync`, see [api/README.md](../api/README.md)), so every cursor
+  handed out before the restore is answered with `410`, even once new changes have pushed the
+  counter past it.
 - `400 VALIDATION_FAILED` – malformed cursor; treat like `410`.
 
 ### Writes
@@ -68,9 +72,16 @@ Errors that matter to the sync engine:
 | status / code | meaning for the pending change |
 |---|---|
 | `404 GAME_NOT_FOUND` | The game was deleted (on another device). Remove it locally and drop the change. For a `DELETE` this is success. |
-| `400 VALIDATION_FAILED`, `409 CONFLICT`, other `4xx` except `401`/`429` | Permanently rejected; see *Rejected changes*. |
+| `400 VALIDATION_FAILED`, `409 CONFLICT`, other `4xx` except `401`/`408`/`429` **with an API error body** | Permanently rejected; see *Rejected changes*. |
 | `401` | Handled by the token refresh; if the session ends, sync stops. |
-| `429`, `5xx`, network failure, timeout | Temporary; keep the change and retry later. |
+| `408`, `429`, `5xx`, network failure, timeout | Temporary; keep the change and retry later. |
+| any other response without an API error body | Temporary. |
+
+An *API error body* is the JSON `ErrorResponse` with a string `code` (any code, also one this app
+version doesn't know). A `4xx` without it – an HTML page from a proxy, a `403` from a firewall, a
+`404` from a misrouted request – did not come from the Game Shelf API, so it says nothing about the
+change and must never undo it or delete a game. Likewise a `404` counts as "deleted" only with the
+code `GAME_NOT_FOUND`.
 
 ## Local data
 
@@ -78,12 +89,22 @@ Errors that matter to the sync engine:
 |---|---|
 | **games** | Every game of the signed-in user, keyed by id, in the `Game` shape. Deleted games are removed. |
 | **pending changes** | At most one per game: `CREATE`, `UPDATE` (with the set of changed field names) or `DELETE`, plus a `revision` that increases with every local change of that game and an `attempted` flag set when it was first sent. |
-| **sync state** | Owner user id, `cursor`, time of the last completed sync. |
+| **sync state** | Owner user id, `cursor`, time of the last completed sync, version of the app that stored the cursor. |
 
 The data belongs to one user. On sign-in, if the stored owner differs from the signed-in user, all
 local data is wiped first. Signing out or deleting the account wipes it. When the session merely
 *expires* (refresh token rejected), the data is kept, so unsynced changes survive and are pushed
 after the same user signs in again.
+
+**After an app update** (the stored app version differs from the running one) the cursor is
+forgotten – games and pending changes are kept – so the next run pulls the whole collection again.
+An older version stored values it did not know (e.g. a new platform) as its "unknown"/`OTHER`
+fallback; the full pull replaces them with the real values. The pull merge table below keeps every
+pending change intact.
+
+A refresh of the tokens is applied only while the session it started from is still the current
+one: when the user signs out (or another user signs in) during a refresh, its result – new tokens or
+a rejection – is ignored.
 
 ### Local changes
 
@@ -121,7 +142,9 @@ one more run after it.
   - `201`: the server has the current local content.
   - `200` (it existed – an earlier attempt got through, but its response was lost): fields edited
     after the first attempt are not on the server yet; if there are any, the change becomes
-    `UPDATE` with those fields and is pushed in the same run.
+    `UPDATE` with those fields and is pushed in the same run. That includes fields edited while
+    this request was in flight – never all fields, which would overwrite changes other devices
+    made since the first attempt.
 - `UPDATE F` → `PATCH /games/{id}` with the fields F taken from the local game.
 - `DELETE` → `DELETE /games/{id}`; `404` counts as success.
 
@@ -146,8 +169,14 @@ The time of the last completed sync is stored when the pull reaches `hasMore = f
 A change rejected permanently can never succeed, so it is undone: drop the pending change; for a
 `CREATE` remove the local game, for an `UPDATE` or `DELETE` restore the server's version with
 `GET /games/{id}` (or remove the game on `404`). A local delete made after the rejected change
-stays queued. The apps show "Some changes were rejected by the server and have been undone." This should
-not happen in practice because the apps validate with the same rules as the API.
+stays queued (also after a rejected `CREATE`: the game is already gone locally, the `DELETE` is pushed
+and a `404` counts as success). The apps show "Some changes were rejected by the server and have been
+undone." – also when the screen that shows it opens only after the run. This should not happen in
+practice because the apps validate with exactly the rules of the API
+([mobile-spec.md](mobile-spec.md#validation)).
+
+A game that is missing from the local store while its pending `CREATE` or `UPDATE` is pushed is a
+local error (temporary), never a sign that the game was deleted on the server.
 
 ### When it runs
 

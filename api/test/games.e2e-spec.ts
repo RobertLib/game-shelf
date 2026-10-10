@@ -159,8 +159,60 @@ describe('Games (e2e)', () => {
       }
     });
 
+    it('accepts what the apps accept', async () => {
+      const game = await create({
+        title: '😀'.repeat(200),
+        platform: 'PC',
+        genre: '🇨🇿'.repeat(50),
+        currency: 'dem',
+        coverImageUrl: 'HTTPS://img.example.co.uk/a_b/%C3%A9.jpg?x=1#y',
+      });
+      expect(game).toMatchObject({
+        currency: 'DEM',
+        coverImageUrl: 'HTTPS://img.example.co.uk/a_b/%C3%A9.jpg?x=1#y',
+      });
+    });
+
+    it('rejects what the apps reject', async () => {
+      const res = await as(user)
+        .post('/games')
+        .send({
+          title: '❤️'.repeat(101),
+          platform: 'PC',
+          currency: 'ıab',
+          coverImageUrl: 'https://example.com/é.png',
+        })
+        .expect(400);
+      const details = res.body.details.join('\n');
+      for (const field of ['title', 'currency', 'coverImageUrl']) {
+        expect(details).toContain(field);
+      }
+    });
+
     it('rejects malformed ids', async () => {
       await as(user).get('/games/not-a-uuid').expect(400);
+    });
+
+    it('answers a body that is too large with VALIDATION_FAILED', async () => {
+      const res = await as(user)
+        .post('/games')
+        .send({ title: 'Doom', platform: 'PC', notes: 'x'.repeat(200_000) })
+        .expect(413);
+      expect(res.body.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('answers an unsupported charset with VALIDATION_FAILED', async () => {
+      const res = await as(user)
+        .post('/games')
+        .set('Content-Type', 'application/json; charset=latin2')
+        .send('{"title":"Doom","platform":"PC"}')
+        .expect(415);
+      expect(res.body.code).toBe('VALIDATION_FAILED');
+    });
+
+    it('answers unknown routes with NOT_FOUND', async () => {
+      const res = await as(user).get('/no-such-route').expect(404);
+      expect(res.body.code).toBe('NOT_FOUND');
     });
   });
 
@@ -304,6 +356,15 @@ describe('Games (e2e)', () => {
       expect(await titles(query)).toEqual(expected);
     });
 
+    it('rejects a page beyond the limit', async () => {
+      for (const page of ['1000001', '1e300']) {
+        const res = await as(user).get(`/games?page=${page}`).expect(400);
+        expect(res.body.code).toBe('VALIDATION_FAILED');
+        expect(res.body.details.join()).toContain('page');
+      }
+      expect(await titles('page=1000000')).toEqual([]);
+    });
+
     it('rejects invalid filters', async () => {
       const res = await as(user)
         .get('/games?platform=GAMEBOY&sort=price&pageSize=1000')
@@ -340,6 +401,52 @@ describe('Games (e2e)', () => {
         releaseYearMin: 1991,
         releaseYearMax: 2001,
       });
+    });
+  });
+
+  describe('text filters with LIKE wildcards', () => {
+    beforeEach(async () => {
+      await create({
+        title: '100% Orange Juice',
+        platform: 'PC',
+        genre: 'Party',
+        publisher: '50% Off Games',
+      });
+      await create({
+        title: 'Snake_Pass',
+        platform: 'PC',
+        genre: 'R_G',
+        developer: 'Sumo_Digital',
+      });
+      await create({
+        title: 'C:\\Games\\Doom',
+        platform: 'PC',
+        genre: 'Shooter\\',
+        storageLocation: 'Box\\1',
+      });
+      await create({ title: 'Plain', platform: 'PC', genre: 'RPG' });
+    });
+
+    const filter = async (query: Record<string, string>) => {
+      const res = await as(user).get('/games').query(query).expect(200);
+      return res.body.items.map((g: { title: string }) => g.title);
+    };
+
+    it.each([
+      [{ q: '%' }, ['100% Orange Juice']],
+      [{ q: '_' }, ['Snake_Pass']],
+      [{ q: '\\' }, ['C:\\Games\\Doom']],
+      [{ q: 'e_P' }, ['Snake_Pass']],
+      [{ q: 's\\d' }, ['C:\\Games\\Doom']],
+      [{ genre: 'R_G' }, ['Snake_Pass']],
+      [{ genre: 'r%' }, []],
+      [{ genre: 'rpg' }, ['Plain']],
+      [{ genre: 'Shooter\\' }, ['C:\\Games\\Doom']],
+      [{ publisher: '%' }, ['100% Orange Juice']],
+      [{ developer: '_' }, ['Snake_Pass']],
+      [{ storageLocation: '\\' }, ['C:\\Games\\Doom']],
+    ])('matches %j literally', async (query, expected) => {
+      expect(await filter(query)).toEqual(expected);
     });
   });
 });

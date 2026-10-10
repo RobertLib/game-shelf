@@ -17,6 +17,8 @@ data class SyncState(
     val ownerUserId: String? = null,
     val cursor: String? = null,
     val lastSyncedAt: Instant? = null,
+    /** `versionCode` of the app that stored [cursor]; a cursor of another version is not continued. */
+    val appVersion: Int? = null,
 )
 
 /**
@@ -101,10 +103,12 @@ private fun PendingChangeEntity.toModel() = PendingChange(gameId, kind, fields, 
 
 private fun PendingChange.toEntity() = PendingChangeEntity(gameId, kind, fields, revision, attempted, queuedAt)
 
-private fun SyncStateEntity.toModel() = SyncState(ownerUserId, cursor, lastSyncedAt?.let(Instant::ofEpochMilli))
+private fun SyncStateEntity.toModel() =
+    SyncState(ownerUserId, cursor, lastSyncedAt?.let(Instant::ofEpochMilli), appVersion)
 
 private fun SyncState.toEntity() = SyncStateEntity(
     ownerUserId = ownerUserId,
     cursor = cursor,
     lastSyncedAt = lastSyncedAt?.toEpochMilli(),
+    appVersion = appVersion,
 )

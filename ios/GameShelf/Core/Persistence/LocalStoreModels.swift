@@ -19,6 +19,8 @@ struct StoreSnapshot: Sendable {
     var pendingCount: Int
     /// End of the last pull that reached the end of the change feed.
     var lastSyncedAt: Date?
+    /// Changes the server rejected were undone, and the user hasn't been told yet.
+    var hasUndoneRejectedChanges = false
 }
 
 /// A local change waiting to be pushed; at most one per game.
@@ -59,8 +61,8 @@ enum PushResult: Sendable {
     case deleted
     /// `404 GAME_NOT_FOUND`: the game was deleted on another device.
     case gameGone
-    /// Permanently rejected (`4xx`); for an `UPDATE` or `DELETE`, the server's current version of
-    /// the game (`nil` when it no longer exists).
+    /// Permanently rejected (`4xx` with an API error body); for an `UPDATE` or `DELETE`, the server's
+    /// current version of the game (`nil` when it no longer exists).
     case rejected(restored: Game?)
 }
 
@@ -74,4 +76,8 @@ enum LocalStoreError: Error, Equatable {
     case gameNotFound
     /// The data no longer belongs to the user the write was made for.
     case accessRevoked
+    /// A pending `CREATE` or `UPDATE` refers to a game that is missing from the local store (or
+    /// can't be read). A local, temporary failure: the change is kept and tried again, and it never
+    /// counts as a deletion on the server.
+    case gameUnavailable
 }

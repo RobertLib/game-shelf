@@ -10,7 +10,7 @@ import type { AuthenticatedRequest } from '../common/current-user.decorator.js';
 import { ErrorCode } from '../common/error-codes.js';
 import { IS_PUBLIC_KEY } from '../common/public.decorator.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { TokenService } from './token.service.js';
+import { passwordChangeStamp, TokenService } from './token.service.js';
 
 /**
  * Global guard: every route needs a valid bearer token unless marked
@@ -44,12 +44,13 @@ export class JwtAuthGuard implements CanActivate {
       select: { id: true, passwordChangedAt: true },
     });
     if (!user) throw unauthorized();
-    if (
-      user.passwordChangedAt &&
-      payload.iat < Math.floor(user.passwordChangedAt.getTime() / 1000)
-    ) {
-      throw unauthorized();
-    }
+    const issuedBeforePasswordChange =
+      payload.pwc === undefined
+        ? // Tokens issued before the claim existed: `iat` has whole seconds only.
+          user.passwordChangedAt !== null &&
+          payload.iat < Math.floor(user.passwordChangedAt.getTime() / 1000)
+        : payload.pwc !== passwordChangeStamp(user);
+    if (issuedBeforePasswordChange) throw unauthorized();
 
     request.user = { id: user.id };
     return true;

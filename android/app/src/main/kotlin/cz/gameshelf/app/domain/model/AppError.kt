@@ -2,12 +2,21 @@ package cz.gameshelf.app.domain.model
 
 /** Failure of a remote operation, independent of the transport details. */
 sealed interface AppError {
-    /** The API answered with an `ErrorResponse`; branch on [code], never on the message. */
+    /**
+     * The API answered with an `ErrorResponse` (an API error body: JSON with a string `code`); branch on
+     * [code], never on the message. A code this app version doesn't know is [ErrorCode.UNKNOWN].
+     */
     data class Api(
         val statusCode: Int,
         val code: ErrorCode,
         val details: List<String> = emptyList(),
     ) : AppError
+
+    /**
+     * An HTTP error without an API error body – an HTML page from a proxy, a `403` from a firewall, a `404`
+     * from a misrouted request. It did not come from the Game Shelf API, so it says nothing about the request.
+     */
+    data class Http(val statusCode: Int) : AppError
 
     /** No connection, DNS failure, timeout… */
     data object Network : AppError

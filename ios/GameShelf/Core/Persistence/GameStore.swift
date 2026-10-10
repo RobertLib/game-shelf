@@ -8,7 +8,11 @@ import Foundation
 /// checks the caller's ``StoreAccess`` inside it. The games are also kept in memory, so the UI
 /// gets a complete ``StoreSnapshot`` after each write without reading the database again.
 actor GameStore {
-    private let db: SQLiteConnection
+    /// The database file; `nil` keeps everything in memory (tests, previews).
+    private let url: URL?
+    /// `CFBundleShortVersionString (CFBundleVersion)` of the running app, stored with the cursor.
+    private let appVersion: String
+    private var connection: SQLiteConnection?
     private let encoder = JSONEncoder.api()
     private let decoder = JSONDecoder.api()
 
@@ -18,60 +22,115 @@ actor GameStore {
     private var games: [Game.ID: Game] = [:]
     private var pendingCount = 0
     private var lastSyncedAt: Date?
+    private var hasUndoneRejectedChanges = false
 
-    /// Opens (or creates) the database at `url`; `nil` keeps everything in memory (tests, previews).
-    init(url: URL?) throws {
-        let db = try SQLiteConnection(url: url)
-        try Self.migrate(db)
-        self.db = db
+    /// Opens (or creates) the database at `url` now; `nil` keeps everything in memory (tests, previews).
+    init(url: URL?, appVersion: String = AppConfiguration.appVersion) throws {
+        self.url = url
+        self.appVersion = appVersion
+        connection = try Self.open(url)
     }
+
+    /// The database file at `url`, opened by the first activation. A file that can't be opened then
+    /// (e.g. while the device is still locked after a restart) is kept, and the next activation
+    /// tries again.
+    init(openingOnFirstUse url: URL, appVersion: String = AppConfiguration.appVersion) {
+        self.url = url
+        self.appVersion = appVersion
+    }
+
+    /// The open connection; opened (and migrated) on first use.
+    private var db: SQLiteConnection {
+        get throws {
+            if let connection {
+                return connection
+            }
+            let connection = try Self.open(url)
+            self.connection = connection
+            return connection
+        }
+    }
+
+    private static func open(_ url: URL?) throws -> SQLiteConnection {
+        if let url {
+            try prepareDirectory(of: url)
+        }
+        let db = try SQLiteConnection(url: url)
+        try migrate(db)
+        return db
+    }
+
+    /// Schema versions (`PRAGMA user_version`): migration `n` brings the schema from version `n` to
+    /// `n + 1`. Each runs in its own transaction; new versions only append to this list.
+    private static let migrations = [
+        // 1: games, pending changes and the sync state.
+        """
+        CREATE TABLE IF NOT EXISTS games (
+            id TEXT PRIMARY KEY NOT NULL,
+            data BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS pending_changes (
+            game_id TEXT PRIMARY KEY NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('CREATE', 'UPDATE', 'DELETE')),
+            fields TEXT NOT NULL DEFAULT '[]',
+            revision INTEGER NOT NULL,
+            attempted INTEGER NOT NULL DEFAULT 0,
+            queued_at REAL NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS sync_state (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            owner_user_id TEXT,
+            cursor TEXT,
+            last_synced_at REAL
+        );
+        INSERT OR IGNORE INTO sync_state (id) VALUES (1);
+        """,
+        // 2: the version of the app that stored the cursor (an update pulls the whole collection
+        // again), and undone rejected changes the user hasn't been told about yet.
+        """
+        ALTER TABLE sync_state ADD COLUMN app_version TEXT;
+        ALTER TABLE sync_state ADD COLUMN has_undone_rejected_changes INTEGER NOT NULL DEFAULT 0;
+        """,
+    ]
 
     private static func migrate(_ db: SQLiteConnection) throws {
         try db.execute("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")
         let schemaVersion = try db.query("PRAGMA user_version") { $0.int(0) }.first ?? 0
-        guard schemaVersion < 1 else { return }
-        try db.transaction {
-            try db.execute("""
-            CREATE TABLE IF NOT EXISTS games (
-                id TEXT PRIMARY KEY NOT NULL,
-                data BLOB NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS pending_changes (
-                game_id TEXT PRIMARY KEY NOT NULL,
-                kind TEXT NOT NULL CHECK (kind IN ('CREATE', 'UPDATE', 'DELETE')),
-                fields TEXT NOT NULL DEFAULT '[]',
-                revision INTEGER NOT NULL,
-                attempted INTEGER NOT NULL DEFAULT 0,
-                queued_at REAL NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS sync_state (
-                id INTEGER PRIMARY KEY CHECK (id = 1),
-                owner_user_id TEXT,
-                cursor TEXT,
-                last_synced_at REAL
-            );
-            INSERT OR IGNORE INTO sync_state (id) VALUES (1);
-            PRAGMA user_version = 1;
-            """)
+        for (index, migration) in migrations.enumerated() where index >= schemaVersion {
+            try db.transaction {
+                try db.execute(migration)
+                try db.execute("PRAGMA user_version = \(index + 1)")
+            }
         }
     }
 
     var snapshot: StoreSnapshot {
-        StoreSnapshot(version: version, games: games, pendingCount: pendingCount, lastSyncedAt: lastSyncedAt)
+        StoreSnapshot(
+            version: version, games: games, pendingCount: pendingCount, lastSyncedAt: lastSyncedAt,
+            hasUndoneRejectedChanges: hasUndoneRejectedChanges
+        )
     }
 
     // MARK: - Owner
 
     /// Makes the data available for `ownerID`. Data of any other user is wiped first.
+    ///
+    /// A damaged database file (`SQLITE_CORRUPT`, `SQLITE_NOTADB`) is replaced by an empty one; any
+    /// other failure is thrown and keeps the file – with the unsynced changes in it – for the next
+    /// attempt.
     func activate(ownerID: User.ID) throws -> (StoreAccess, StoreSnapshot) {
-        let storedOwner = try db.query("SELECT owner_user_id FROM sync_state WHERE id = 1") { $0.text(0) }.first ?? nil
-        if storedOwner != ownerID {
-            try db.transaction {
-                try deleteAllData()
-                try db.run("UPDATE sync_state SET owner_user_id = ? WHERE id = 1", [.text(ownerID)])
-            }
+        let cache: Cache
+        do {
+            cache = try loadReplacingDamagedFile(ownerID)
+        } catch {
+            // The next attempt opens the file again.
+            connection = nil
+            throw error
         }
-        try loadCache()
+        games = cache.games
+        pendingCount = cache.pendingCount
+        lastSyncedAt = cache.lastSyncedAt
+        hasUndoneRejectedChanges = cache.hasUndoneRejectedChanges
         generation += 1
         version += 1
         let access = StoreAccess(ownerID: ownerID, generation: generation)
@@ -89,31 +148,101 @@ actor GameStore {
         games = [:]
         pendingCount = 0
         lastSyncedAt = nil
+        hasUndoneRejectedChanges = false
         version += 1
     }
 
     private func deleteAllData() throws {
         try db.run("DELETE FROM games")
         try db.run("DELETE FROM pending_changes")
-        try db.run("UPDATE sync_state SET owner_user_id = NULL, cursor = NULL, last_synced_at = NULL WHERE id = 1")
+        try db.run("""
+        UPDATE sync_state SET owner_user_id = NULL, cursor = NULL, last_synced_at = NULL, app_version = NULL,
+            has_undone_rejected_changes = 0
+        WHERE id = 1
+        """)
     }
 
-    private func loadCache() throws {
+    /// What ``activate(ownerID:)`` keeps in memory.
+    private struct Cache {
+        var games: [Game.ID: Game]
+        var pendingCount: Int
+        var lastSyncedAt: Date?
+        var hasUndoneRejectedChanges: Bool
+    }
+
+    private func loadReplacingDamagedFile(_ ownerID: User.ID) throws -> Cache {
+        do {
+            return try load(ownerID)
+        } catch let error as SQLiteError where error.isCorruption {
+            guard let url else { throw error }
+            debugLog("The local database is damaged, recreating it: \(error)")
+            connection = nil
+            Self.removeDatabase(at: url)
+            return try load(ownerID)
+        }
+    }
+
+    /// Prepares the stored data for `ownerID` in one transaction and reads it.
+    private func load(_ ownerID: User.ID) throws -> Cache {
+        try db.transaction {
+            let state = try db.query("SELECT owner_user_id, app_version FROM sync_state WHERE id = 1") {
+                (owner: $0.text(0), appVersion: $0.text(1))
+            }.first
+            if state?.owner != ownerID {
+                try deleteAllData()
+                try db.run("UPDATE sync_state SET owner_user_id = ? WHERE id = 1", [.text(ownerID)])
+            } else if state?.appVersion != appVersion {
+                // After an app update the whole collection is pulled again: the previous version stored
+                // values it didn't know as its fallback (docs/offline-sync.md, "After an app update").
+                try forgetCursor()
+            }
+            return try readCache()
+        }
+    }
+
+    /// Reads the games and the sync state.
+    ///
+    /// A stored game that can't be decoded is never dropped together with its pending change: it stays
+    /// in the database, and pushing its change fails as a temporary local error until an app version
+    /// that can read it is installed. Unreadable games without a pending change are on the server; they
+    /// are removed and the whole collection is pulled again.
+    private func readCache() throws -> Cache {
         let rows = try db.query("SELECT id, data FROM games") { row in (row.text(0) ?? "", row.data(1)) }
+        let pendingIDs = Set(try db.query("SELECT game_id FROM pending_changes") { $0.text(0) ?? "" })
         var loaded: [Game.ID: Game] = [:]
         loaded.reserveCapacity(rows.count)
+        var replaceable: [Game.ID] = []
         for (id, data) in rows {
             do {
                 loaded[id] = try decoder.decode(Game.self, from: data)
             } catch {
-                debugLog("Skipping unreadable stored game \(id): \(error)")
+                let isPending = pendingIDs.contains(id)
+                debugLog("Stored game \(id) can't be read\(isPending ? ", kept with its pending change" : ""): \(error)")
+                if !isPending {
+                    replaceable.append(id)
+                }
             }
         }
-        games = loaded
-        pendingCount = try countPendingChanges()
-        lastSyncedAt = try db.query("SELECT last_synced_at FROM sync_state WHERE id = 1") { row in
-            row.isNull(0) ? nil : Date(timeIntervalSince1970: row.double(0))
-        }.first ?? nil
+        if !replaceable.isEmpty {
+            for id in replaceable {
+                try db.run("DELETE FROM games WHERE id = ?", [.text(id)])
+            }
+            try forgetCursor()
+        }
+        let state = try db.query("SELECT last_synced_at, has_undone_rejected_changes FROM sync_state WHERE id = 1") { row in
+            (lastSyncedAt: row.isNull(0) ? nil : Date(timeIntervalSince1970: row.double(0)), hasUndone: row.int(1) != 0)
+        }.first
+        return Cache(
+            games: loaded,
+            pendingCount: try countPendingChanges(),
+            lastSyncedAt: state?.lastSyncedAt,
+            hasUndoneRejectedChanges: state?.hasUndone ?? false
+        )
+    }
+
+    /// The next pull starts from the beginning of the change feed.
+    private func forgetCursor() throws {
+        try db.run("UPDATE sync_state SET cursor = NULL WHERE id = 1")
     }
 
     // MARK: - Local changes
@@ -246,13 +375,14 @@ actor GameStore {
                 guard current.kind != .delete else { return }
 
                 if case .alreadyExisted = result {
-                    // Fields edited after the first attempt never reached the server.
-                    if current.fields.isEmpty, isUnchanged {
+                    // Only the fields edited after the first attempt (also while this request was in
+                    // flight) never reached the server – never all fields, which would overwrite what
+                    // other devices changed since.
+                    if current.fields.isEmpty {
                         try dropPendingChange(for: id)
                         try put(server, &changes)
                     } else {
                         current.kind = .update
-                        if current.fields.isEmpty { current.fields = Set(GameField.allCases) }
                         try save(current)
                         try put(local.map { server.merging(current.fields, from: $0) } ?? server, &changes)
                         pushAgain = true
@@ -279,6 +409,9 @@ actor GameStore {
                 try dropPendingChange(for: id)
 
             case .rejected(let restored):
+                // Shown to the user until they have seen it, also after a restart.
+                try db.run("UPDATE sync_state SET has_undone_rejected_changes = 1 WHERE id = 1")
+                changes.hasUndoneRejectedChanges = true
                 // A local delete made in the meantime still wins.
                 if current?.kind == .delete, sent.kind != .delete { return }
                 try dropPendingChange(for: id)
@@ -305,11 +438,20 @@ actor GameStore {
         return try db.query("SELECT cursor FROM sync_state WHERE id = 1") { $0.text(0) }.first ?? nil
     }
 
-    /// Applies one page of the change feed together with its cursor; the last page also records
-    /// the time of the completed sync.
-    func applyChanges(_ page: GameChanges, at now: Date, access: StoreAccess) throws -> StoreSnapshot {
+    /// Applies one page of the change feed together with its cursor and the version of the app that
+    /// stored it; the last page also records the time of the completed sync.
+    ///
+    /// `startingOver`: the first page of a full pull after `410 SYNC_RESET_REQUIRED`. Every game
+    /// without a pending change is dropped in the same transaction, so until the first page has
+    /// arrived, the collection stays as it was.
+    func applyChanges(_ page: GameChanges, at now: Date, startingOver: Bool = false, access: StoreAccess) throws -> StoreSnapshot {
         try write(access) { changes in
             let pending = try pendingChangesByGame()
+            if startingOver {
+                for id in games.keys where pending[id] == nil {
+                    try remove(id, &changes)
+                }
+            }
             for game in page.games {
                 switch pending[game.id] {
                 case nil:
@@ -328,7 +470,7 @@ actor GameStore {
                     try dropPendingChange(for: id)
                 }
             }
-            try db.run("UPDATE sync_state SET cursor = ? WHERE id = 1", [.text(page.cursor)])
+            try db.run("UPDATE sync_state SET cursor = ?, app_version = ? WHERE id = 1", [.text(page.cursor), .text(appVersion)])
             if !page.hasMore {
                 try db.run("UPDATE sync_state SET last_synced_at = ? WHERE id = 1", [.real(now.timeIntervalSince1970)])
                 changes.lastSyncedAt = now
@@ -336,15 +478,11 @@ actor GameStore {
         }.snapshot
     }
 
-    /// `410 SYNC_RESET_REQUIRED`: drops every game without a pending change and forgets the cursor,
-    /// so the next pull starts from the beginning.
-    func resetForFullPull(access: StoreAccess) throws -> StoreSnapshot {
+    /// The user has been told that rejected changes were undone.
+    func acknowledgeUndoneRejectedChanges(access: StoreAccess) throws -> StoreSnapshot {
         try write(access) { changes in
-            let pending = try pendingChangesByGame()
-            for id in games.keys where pending[id] == nil {
-                try remove(id, &changes)
-            }
-            try db.run("UPDATE sync_state SET cursor = NULL WHERE id = 1")
+            try db.run("UPDATE sync_state SET has_undone_rejected_changes = 0 WHERE id = 1")
+            changes.hasUndoneRejectedChanges = false
         }.snapshot
     }
 
@@ -362,6 +500,7 @@ actor GameStore {
         var upserted: [Game.ID: Game] = [:]
         var removed: Set<Game.ID> = []
         var lastSyncedAt: Date?
+        var hasUndoneRejectedChanges: Bool?
         var pendingCount = 0
     }
 
@@ -387,6 +526,9 @@ actor GameStore {
         pendingCount = changes.pendingCount
         if let date = changes.lastSyncedAt {
             lastSyncedAt = date
+        }
+        if let hasUndone = changes.hasUndoneRejectedChanges {
+            hasUndoneRejectedChanges = hasUndone
         }
         version += 1
         return (result, snapshot)
@@ -458,43 +600,26 @@ actor GameStore {
 // MARK: - Location
 
 extension GameStore {
-    /// The app's database in Application Support, excluded from backups. If the file can't be
-    /// used it is recreated; as a last resort the data is kept in memory for this launch.
+    /// The app's database in Application Support, excluded from backups, opened by the first activation.
     static func makeDefault(erasingExisting: Bool = false) -> GameStore {
-        do {
-            let url = try databaseURL()
-            if erasingExisting {
-                removeDatabase(at: url)
-            }
-            do {
-                return try GameStore(url: url)
-            } catch {
-                debugLog("The local database can't be opened, recreating it: \(error)")
-                removeDatabase(at: url)
-                return try GameStore(url: url)
-            }
-        } catch {
-            debugLog("The local database is unavailable, keeping data in memory: \(error)")
-            guard let store = try? GameStore(url: nil) else {
-                preconditionFailure("SQLite can't open an in-memory database.")
-            }
-            return store
+        let url = URL.applicationSupportDirectory.appending(path: "OfflineData/games.sqlite")
+        if erasingExisting {
+            removeDatabase(at: url)
         }
+        return GameStore(openingOnFirstUse: url)
     }
 
-    private static func databaseURL() throws -> URL {
+    /// Creates the database's directory: readable after the first unlock (like the session in the
+    /// Keychain) and not backed up – the collection is restored from the server after a device restore.
+    private static func prepareDirectory(of url: URL) throws {
         let fileManager = FileManager.default
-        var directory = try fileManager
-            .url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-            .appending(path: "OfflineData", directoryHint: .isDirectory)
+        var directory = url.deletingLastPathComponent()
         let protection: [FileAttributeKey: Any] = [.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication]
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true, attributes: protection)
         try fileManager.setAttributes(protection, ofItemAtPath: directory.path(percentEncoded: false))
-        // The collection is restored from the server after a device restore; don't back it up.
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
         try directory.setResourceValues(values)
-        return directory.appending(path: "games.sqlite")
     }
 
     private static func removeDatabase(at url: URL) {

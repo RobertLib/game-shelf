@@ -39,8 +39,9 @@
     <string name="validation_year">Enter a year between 1950 and 2100.</string>
     <string name="validation_quantity">Enter a whole number from 1 to 999.</string>
     <string name="validation_price">Enter a non-negative number with at most 2 decimal places.</string>
+    <string name="validation_price_too_large">Enter at most %1$s.</string>
     <string name="validation_barcode">The barcode must have 8–14 digits.</string>
-    <string name="validation_url">Enter an address starting with http:// or https://.</string>
+    <string name="validation_url">Enter a valid web address starting with http:// or https://.</string>
     <string name="validation_currency">Enter a three-letter currency code, e.g. CZK.</string>
     <string name="validation_range">The “from” value is greater than the “to” value.</string>
     <string name="validation_fix_errors">Please fix the highlighted fields.</string>

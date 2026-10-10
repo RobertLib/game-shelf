@@ -34,6 +34,7 @@
 		AA000000000000000000001A /* Exceptions for "GameShelf" folder in "GameShelf" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				"Info-Debug.plist",
 				Info.plist,
 			);
 			target = AA0000000000000000000010 /* GameShelf */;
@@ -122,6 +123,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = AA0000000000000000000023 /* Build configuration list for PBXNativeTarget "GameShelf" */;
 			buildPhases = (
+				AA0000000000000000000035 /* Check API base URL (Release) */,
 				AA0000000000000000000012 /* Sources */,
 				AA0000000000000000000013 /* Frameworks */,
 				AA0000000000000000000014 /* Resources */,
@@ -253,6 +255,29 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		AA0000000000000000000035 /* Check API base URL (Release) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Check API base URL (Release)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Release builds talk to the production API: refuse to build one without its URL.\n# Pass it to xcodebuild (API_BASE_URL=https://api.your-domain/api/v1/) or set it in the\n# GameShelf target's build settings; see ios/README.md.\n[ \"$CONFIGURATION\" = \"Release\" ] || exit 0\ncase \"$API_BASE_URL\" in\n  https://?*) ;;\n  *)\n    echo \"error: Release builds need API_BASE_URL set to the HTTPS URL of the production API (got '$API_BASE_URL'). Pass API_BASE_URL=https://api.your-domain/api/v1/ to xcodebuild or set it in the GameShelf target; see ios/README.md.\"\n    exit 1\n    ;;\nesac\ncase \"$API_BASE_URL\" in\n  *://localhost*|*://127.*|*example.com*|*example.net*|*example.org*)\n    echo \"error: API_BASE_URL=$API_BASE_URL is a placeholder or a local address, not the production API; see ios/README.md.\"\n    exit 1\n    ;;\nesac\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		AA0000000000000000000012 /* Sources */ = {
@@ -430,7 +455,7 @@
 				DEVELOPMENT_TEAM = K6GM85X5D7;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = GameShelf/Info.plist;
+				INFOPLIST_FILE = "GameShelf/Info-Debug.plist";
 				INFOPLIST_KEY_CFBundleDisplayName = "Game Shelf";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.entertainment";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Game Shelf uses the camera to scan the barcode on a game box and fill in its details.";
@@ -457,7 +482,7 @@
 		AA0000000000000000000025 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				API_BASE_URL = "https://api.example.com/api/v1/";
+				API_BASE_URL = "";
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;

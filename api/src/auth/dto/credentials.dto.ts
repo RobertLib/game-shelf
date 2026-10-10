@@ -1,13 +1,7 @@
 import { ApiProperty, ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
-import {
-  IsEmail,
-  IsNotEmpty,
-  IsOptional,
-  IsString,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
+import { IsEmail, IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { MaxChars, MinChars } from '../../common/char-length.decorator.js';
 import { TrimToNull } from '../../common/transforms.js';
 
 export const PASSWORD_MIN_LENGTH = 8;
@@ -23,13 +17,13 @@ export class LoginDto {
   @ApiProperty({ format: 'email', example: 'collector@example.com' })
   @NormalizeEmail()
   @IsEmail()
-  @MaxLength(254)
+  @MaxChars(254)
   email: string;
 
   @ApiProperty({ format: 'password', example: 'super-secret-123' })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(PASSWORD_MAX_LENGTH)
+  @MaxChars(PASSWORD_MAX_LENGTH)
   password: string;
 }
 
@@ -38,7 +32,7 @@ export class RegisterDto {
   @ApiProperty({ format: 'email', example: 'collector@example.com' })
   @NormalizeEmail()
   @IsEmail()
-  @MaxLength(254)
+  @MaxChars(254)
   email: string;
 
   @ApiProperty({
@@ -48,8 +42,8 @@ export class RegisterDto {
     example: 'super-secret-123',
   })
   @IsString()
-  @MinLength(PASSWORD_MIN_LENGTH)
-  @MaxLength(PASSWORD_MAX_LENGTH)
+  @MinChars(PASSWORD_MIN_LENGTH)
+  @MaxChars(PASSWORD_MAX_LENGTH)
   password: string;
 
   @ApiPropertyOptional({
@@ -61,7 +55,7 @@ export class RegisterDto {
   @TrimToNull()
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   displayName?: string | null;
 }
 
@@ -70,7 +64,7 @@ export class RefreshTokenDto {
   @ApiProperty()
   @IsString()
   @IsNotEmpty()
-  @MaxLength(200)
+  @MaxChars(200)
   refreshToken: string;
 }
 
@@ -79,7 +73,7 @@ export class ChangePasswordDto {
   @ApiProperty({ format: 'password' })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(PASSWORD_MAX_LENGTH)
+  @MaxChars(PASSWORD_MAX_LENGTH)
   currentPassword: string;
 
   @ApiProperty({
@@ -88,8 +82,8 @@ export class ChangePasswordDto {
     maxLength: PASSWORD_MAX_LENGTH,
   })
   @IsString()
-  @MinLength(PASSWORD_MIN_LENGTH)
-  @MaxLength(PASSWORD_MAX_LENGTH)
+  @MinChars(PASSWORD_MIN_LENGTH)
+  @MaxChars(PASSWORD_MAX_LENGTH)
   newPassword: string;
 }
 
@@ -101,6 +95,6 @@ export class DeleteAccountDto {
   })
   @IsString()
   @IsNotEmpty()
-  @MaxLength(PASSWORD_MAX_LENGTH)
+  @MaxChars(PASSWORD_MAX_LENGTH)
   password: string;
 }

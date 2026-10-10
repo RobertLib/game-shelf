@@ -52,7 +52,7 @@ final class APIClient: Sendable {
             do {
                 return try await perform(endpoint, accessToken: renewedToken)
             } catch let error as APIError where error.isUnauthorized {
-                await tokens.expire()
+                await tokens.expire(rejecting: renewedToken)
                 throw APIError.sessionExpired
             }
         }
@@ -72,12 +72,11 @@ final class APIClient: Sendable {
 
         guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
-            let body = try? decoder.decode(ErrorResponse.self, from: data)
-            throw APIError.server(
-                statusCode: http.statusCode,
-                code: body?.code ?? .unknown,
-                details: body?.details ?? []
-            )
+            // Only a body with the API's error `code` comes from the Game Shelf API.
+            guard let body = try? decoder.decode(ErrorResponse.self, from: data) else {
+                throw APIError.http(statusCode: http.statusCode)
+            }
+            throw APIError.server(statusCode: http.statusCode, code: body.code, details: body.details ?? [])
         }
 
         if let empty = EmptyResponse() as? Response {

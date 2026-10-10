@@ -1,7 +1,8 @@
 package cz.gameshelf.app.di
 
 import android.content.Context
-import androidx.datastore.preferences.preferencesDataStore
+import android.util.Log
+import androidx.datastore.preferences.preferencesDataStoreFile
 import cz.gameshelf.app.BuildConfig
 import cz.gameshelf.app.data.api.AccountApi
 import cz.gameshelf.app.data.api.ApiJson
@@ -18,6 +19,7 @@ import cz.gameshelf.app.data.auth.EncryptedSessionStore
 import cz.gameshelf.app.data.auth.KeystorePayloadCipher
 import cz.gameshelf.app.data.auth.SessionManager
 import cz.gameshelf.app.data.auth.SessionState
+import cz.gameshelf.app.data.auth.sessionDataStore
 import cz.gameshelf.app.data.games.GamesRepository
 import cz.gameshelf.app.data.games.OfflineGamesRepository
 import cz.gameshelf.app.data.local.GameShelfDatabase
@@ -30,6 +32,7 @@ import cz.gameshelf.app.data.sync.ForegroundMonitor
 import cz.gameshelf.app.data.sync.NetworkMonitor
 import cz.gameshelf.app.data.sync.SyncController
 import cz.gameshelf.app.data.sync.SyncEngine
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -39,24 +42,35 @@ import kotlinx.coroutines.flow.stateIn
 import okhttp3.OkHttpClient
 import retrofit2.create
 
-private val Context.sessionDataStore by preferencesDataStore(name = "session")
+private const val TAG = "AppContainer"
+
+/**
+ * The scope of work that outlives every screen. An exception escaping one of its coroutines is logged
+ * instead of crashing the app; the others keep running.
+ */
+internal fun createAppScope(): CoroutineScope {
+    val logUncaught = CoroutineExceptionHandler { _, e -> Log.e(TAG, "Uncaught exception in the app scope", e) }
+    return CoroutineScope(SupervisorJob() + Dispatchers.Default + logUncaught)
+}
 
 /** Manual dependency graph, created once by the Application (on the main thread). */
 class AppContainer(context: Context) {
 
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val appScope = createAppScope()
 
     val sessionManager = SessionManager(
-        store = EncryptedSessionStore(context.sessionDataStore, KeystorePayloadCipher(), ApiJson),
+        store = EncryptedSessionStore(
+            dataStore = sessionDataStore { context.preferencesDataStoreFile("session") },
+            cipher = KeystorePayloadCipher(),
+            json = ApiJson,
+        ),
         scope = appScope,
     )
 
-    /** Shared connection pool; Coil uses it as is, without API auth or logging. */
+    /** Shared connection pool and dispatcher; Coil uses it as is, without API auth or logging. */
     val imageHttpClient: OkHttpClient = HttpClients.base()
 
-    private val publicApiClient: OkHttpClient = imageHttpClient.newBuilder()
-        .addDebugLogging(BuildConfig.DEBUG)
-        .build()
+    private val publicApiClient: OkHttpClient = HttpClients.authClient(imageHttpClient, BuildConfig.DEBUG)
 
     private val authApi: AuthApi =
         HttpClients.retrofit(BuildConfig.API_BASE_URL, publicApiClient).create()
@@ -84,6 +98,7 @@ class AppContainer(context: Context) {
         isConnected = NetworkMonitor(context).isConnected,
         isForeground = ForegroundMonitor().isForeground,
         scope = appScope,
+        appVersion = BuildConfig.VERSION_CODE,
     )
 
     val syncController: SyncController = syncEngine

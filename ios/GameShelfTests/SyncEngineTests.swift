@@ -15,10 +15,10 @@ private struct SyncHarness {
     let repository: GameRepository
     let engine: SyncEngine
 
-    init(server: FakeGameServer = FakeGameServer()) async throws {
+    init(server: FakeGameServer = FakeGameServer(), store: GameStore? = nil) async throws {
         self.server = server
-        store = try GameStore(url: nil)
-        repository = GameRepository(store: store, status: SyncStatus())
+        self.store = try store ?? GameStore(url: nil)
+        repository = GameRepository(store: self.store, status: SyncStatus())
         engine = SyncEngine(repository: repository, api: server)
         repository.onLocalChange = nil
         await engine.activate(ownerID: Self.owner)
@@ -92,6 +92,31 @@ struct SyncEngineTests {
         ])
         #expect(await harness.server.games[game.id]?.notes == "Big box")
         #expect(harness.repository.game(id: game.id)?.notes == "Big box")
+        #expect(try await harness.pending().isEmpty)
+    }
+
+    @Test func replayedCreatePushesOnlyTheFieldsEditedWhileItWasInFlight() async throws {
+        let harness = try await SyncHarness()
+        let game = try await harness.repository.create(SaveGameRequest(title: "Doom", platform: .pc))
+        // The first POST reaches the server, but its response is lost.
+        await harness.server.fail(.create, with: .network(.timedOut), afterApplying: true)
+        await #expect(throws: APIError.network(.timedOut)) {
+            try await harness.engine.syncNow()
+        }
+        await harness.server.editOnAnotherDevice(game.id) { $0.title = "Doom (other device)" }
+
+        // The edit happens while the second POST is in flight.
+        await harness.server.hold(.create)
+        let run = Task { try await harness.engine.syncNow() }
+        await harness.server.waitUntilHeld()
+        try await harness.edit(game) { $0.rating = 9 }
+        await harness.server.release()
+        try await run.value
+
+        #expect(await harness.server.requests(.update) == [.init(operation: .update, gameID: game.id, fields: [.rating])])
+        let server = try #require(await harness.server.games[game.id])
+        #expect(server.rating == 9)
+        #expect(server.title == "Doom (other device)", "fields not edited are never sent")
         #expect(try await harness.pending().isEmpty)
     }
 
@@ -234,6 +259,34 @@ struct SyncEngineTests {
         #expect(harness.status.pendingCount == 0)
     }
 
+    @Test func aResetIsStoredTogetherWithTheFirstPageOfTheFullPull() async throws {
+        let harness = try await SyncHarness()
+        let kept = try await harness.syncedGame("Kept")
+        let other = try await harness.syncedGame("Other")
+        try await harness.edit(kept) { $0.title = "Kept (edited)" }
+        let lastSyncedAt = harness.status.lastSyncedAt
+        let access = try #require(harness.repository.access)
+        let cursor = try await harness.store.cursor(access: access)
+
+        // The cursor can't be continued, and the first page of the full pull fails.
+        await harness.server.fail(.changes, with: .server(statusCode: 410, code: .syncResetRequired, details: []))
+        await harness.server.fail(.changes, with: .network(.timedOut))
+        await #expect(throws: APIError.network(.timedOut)) {
+            try await harness.engine.syncNow()
+        }
+        // Nothing was thrown away yet: the collection is shown as it was.
+        #expect(Set(harness.repository.games.map(\.id)) == [kept.id, other.id])
+        #expect(harness.status.lastSyncedAt == lastSyncedAt)
+        #expect(try await harness.store.cursor(access: access) == cursor)
+
+        await harness.server.loseWithoutTrace(other.id)
+        await harness.server.fail(.changes, with: .server(statusCode: 410, code: .syncResetRequired, details: []))
+        try await harness.engine.syncNow()
+        #expect(Set(harness.repository.games.map(\.id)) == [kept.id])
+        let changesRequests = await harness.server.requests(.changes)
+        #expect(changesRequests.suffix(2).map(\.cursor) == [cursor, nil])
+    }
+
     @Test func resetRequiredKeepsGamesWithPendingChangesAndPullsAgain() async throws {
         let harness = try await SyncHarness()
         let kept = try await harness.syncedGame("Kept")
@@ -352,9 +405,17 @@ struct SyncEngineTests {
         (.server(statusCode: 400, code: .validationFailed, details: []), .rejected),
         (.server(statusCode: 409, code: .conflict, details: []), .rejected),
         (.server(statusCode: 404, code: .notFound, details: []), .rejected),
+        (.server(statusCode: 403, code: .unknown, details: []), .rejected),
         (.server(statusCode: 401, code: .unauthorized, details: []), .temporary),
+        (.server(statusCode: 408, code: .unknown, details: []), .temporary),
         (.server(statusCode: 429, code: .tooManyRequests, details: []), .temporary),
         (.server(statusCode: 500, code: .internalError, details: []), .temporary),
+        // Responses without an API error body never undo a change or delete a game.
+        (.http(statusCode: 400), .temporary),
+        (.http(statusCode: 403), .temporary),
+        (.http(statusCode: 404), .temporary),
+        (.http(statusCode: 409), .temporary),
+        (.http(statusCode: 502), .temporary),
         (.network(.timedOut), .temporary),
         (.invalidResponse, .temporary),
         (.sessionExpired, .temporary),
@@ -363,6 +424,146 @@ struct SyncEngineTests {
     @Test(arguments: classificationCases)
     func failureClassification(error: APIError, expected: SyncEngine.FailureKind) {
         #expect(SyncEngine.classify(error) == expected)
+    }
+
+    @Test func aDeleteAnswered404WithoutAnAPIErrorBodyIsKept() async throws {
+        let harness = try await SyncHarness()
+        let game = try await harness.syncedGame()
+        try await harness.repository.delete(id: game.id)
+        await harness.server.fail(.delete, with: .http(statusCode: 404))
+
+        await #expect(throws: APIError.http(statusCode: 404)) {
+            try await harness.engine.syncNow()
+        }
+        #expect(try await harness.pending().map(\.kind) == [.delete])
+        #expect(await harness.server.games[game.id] != nil)
+
+        try await harness.engine.syncNow()
+        #expect(await harness.server.games[game.id] == nil)
+        #expect(try await harness.pending().isEmpty)
+    }
+
+    @Test(arguments: [APIError.http(statusCode: 403), .http(statusCode: 404), .http(statusCode: 400), .server(statusCode: 408, code: .unknown, details: [])])
+    func anEditAnsweredWithoutAnAPIErrorBodyIsNeitherUndoneNorDeleted(error: APIError) async throws {
+        let harness = try await SyncHarness()
+        let game = try await harness.syncedGame()
+        try await harness.edit(game) { $0.notes = "Kept" }
+        await harness.server.fail(.update, with: error)
+
+        await #expect(throws: error) {
+            try await harness.engine.syncNow()
+        }
+        #expect(harness.repository.game(id: game.id)?.notes == "Kept")
+        #expect(try await harness.pending().map(\.fields) == [[.notes]])
+        #expect(!harness.status.hasUndoneRejectedChanges)
+    }
+
+    @Test func a404WithAnotherCodeIsARejectionNotADeletion() async throws {
+        let harness = try await SyncHarness()
+        let game = try await harness.syncedGame()
+        try await harness.edit(game) { $0.notes = "Rejected" }
+        await harness.server.fail(.update, with: .server(statusCode: 404, code: .notFound, details: []))
+
+        try await harness.engine.syncNow()
+
+        #expect(harness.repository.game(id: game.id) == game, "the server's version is restored")
+        #expect(try await harness.pending().isEmpty)
+        #expect(harness.status.hasUndoneRejectedChanges)
+    }
+
+    @Test func undoneRejectedChangesAreShownUntilSeenEvenAfterReactivation() async throws {
+        let harness = try await SyncHarness()
+        _ = try await harness.repository.create(SaveGameRequest(title: "Doom", platform: .pc))
+        await harness.server.fail(.create, with: .server(statusCode: 400, code: .validationFailed, details: []))
+        try await harness.engine.syncNow()
+        #expect(harness.status.hasUndoneRejectedChanges)
+
+        // No screen showed it before the session expired; it is still shown after the next sign-in.
+        await harness.engine.sessionDidExpire()
+        #expect(!harness.status.hasUndoneRejectedChanges)
+        await harness.engine.activate(ownerID: SyncHarness.owner)
+        #expect(harness.status.hasUndoneRejectedChanges)
+
+        await harness.repository.acknowledgeUndoneRejectedChanges()?.value
+        #expect(!harness.status.hasUndoneRejectedChanges)
+        await harness.engine.sessionDidExpire()
+        await harness.engine.activate(ownerID: SyncHarness.owner)
+        #expect(!harness.status.hasUndoneRejectedChanges)
+    }
+
+    @Test func aGameMissingLocallyIsATemporaryErrorNeverADeletion() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "games.sqlite")
+        let game = Fixtures.game("Created offline")
+        do {
+            let store = try GameStore(url: url)
+            let (access, _) = try await store.activate(ownerID: SyncHarness.owner)
+            _ = try await store.insert(game, at: .now, access: access)
+        }
+        // The stored game can't be read (e.g. written by a newer version of the app).
+        try SQLiteConnection(url: url).run("UPDATE games SET data = ?", [.blob(Data("{}".utf8))])
+
+        let server = FakeGameServer()
+        let store = try GameStore(url: url)
+        let repository = GameRepository(store: store, status: SyncStatus())
+        let engine = SyncEngine(repository: repository, api: server)
+        repository.onLocalChange = nil
+        await engine.activate(ownerID: SyncHarness.owner)
+
+        await #expect(throws: LocalStoreError.gameUnavailable) {
+            try await engine.syncNow()
+        }
+        #expect(await server.requests(.create).isEmpty)
+        #expect(try await store.pendingChanges().map(\.kind) == [.create])
+        #expect(repository.status.pendingCount == 1)
+        #expect(repository.status.lastErrorMessage == "Something went wrong. Please try again.")
+        #expect(!repository.status.hasUndoneRejectedChanges)
+        #expect(try SQLiteConnection(url: url).query("SELECT id FROM games") { $0.text(0) } == [game.id])
+    }
+
+    @Test func anAppUpdatePullsTheWholeCollectionAgain() async throws {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "games.sqlite")
+        let server = FakeGameServer()
+        let game = Fixtures.game("Chrono Trigger", .snes)
+        await server.seed(game)
+
+        let before = try await SyncHarness(server: server, store: GameStore(url: url, appVersion: "1.0 (1)"))
+        let cursor = try await before.store.cursor(access: try #require(before.repository.access))
+        #expect(cursor != nil)
+        // An edit made with the old version is still waiting when the app is updated.
+        try await before.edit(game) { $0.notes = "Unsynced" }
+        await before.engine.deactivate(erasingData: false)
+
+        let after = try await SyncHarness(server: server, store: GameStore(url: url, appVersion: "1.1 (2)"))
+        #expect(await server.requests(.changes).last?.cursor == nil)
+        #expect(await server.games[game.id]?.notes == "Unsynced")
+        #expect(after.repository.game(id: game.id)?.notes == "Unsynced")
+        #expect(try await after.pending().isEmpty)
+    }
+
+    // MARK: Windows
+
+    @Test func theAppIsInTheForegroundWhileAnyWindowIsActive() async throws {
+        let harness = try await SyncHarness()
+        let first = UUID()
+        let second = UUID()
+        #expect(!harness.engine.isAppActive)
+
+        harness.engine.setScene(first, isActive: true)
+        harness.engine.setScene(second, isActive: true)
+        #expect(harness.engine.isAppActive)
+        // One window going to the background (or closing) leaves the app in the foreground.
+        harness.engine.setScene(first, isActive: false)
+        #expect(harness.engine.isAppActive)
+        harness.engine.setScene(second, isActive: false)
+        #expect(!harness.engine.isAppActive)
+        harness.engine.setScene(second, isActive: true)
+        #expect(harness.engine.isAppActive)
     }
 
     @Test func backoffDoublesUpToFiveMinutes() {

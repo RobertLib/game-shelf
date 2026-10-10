@@ -83,6 +83,23 @@ struct GameAPIRequestTests {
         #expect(next.httpMethod == "GET")
     }
 
+    @Test(arguments: [
+        (404, "<html><body>Not Found</body></html>", APIError.http(statusCode: 404)),
+        (403, "Forbidden by the firewall", .http(statusCode: 403)),
+        (502, "", .http(statusCode: 502)),
+        (404, #"{"statusCode":404,"error":"Not Found"}"#, .http(statusCode: 404)),
+        (404, #"{"statusCode":404,"code":"GAME_NOT_FOUND","message":"Game not found"}"#, .server(statusCode: 404, code: .gameNotFound, details: [])),
+        (418, #"{"code":"BRAND_NEW_CODE"}"#, .server(statusCode: 418, code: .unknown, details: [])),
+        (400, #"{"statusCode":400,"code":"VALIDATION_FAILED","message":"Bad","details":["title is too long"]}"#,
+         .server(statusCode: 400, code: .validationFailed, details: ["title is too long"])),
+    ])
+    func onlyResponsesWithAnAPIErrorBodyAreServerErrors(status: Int, body: String, expected: APIError) async {
+        let (api, _, _) = makeAPI { _ in (status, Data(body.utf8)) }
+        await #expect(throws: expected) {
+            try await api.delete(id: "abc")
+        }
+    }
+
     @Test func resetRequiredIsRecognized() async throws {
         let (api, _, _) = makeAPI { _ in (410, Fixtures.errorJSON(status: 410, code: "SYNC_RESET_REQUIRED")) }
         await #expect(throws: APIError.server(statusCode: 410, code: .syncResetRequired, details: [])) {

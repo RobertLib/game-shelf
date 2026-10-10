@@ -30,6 +30,12 @@ struct ErrorMessageTests {
 
     @Test func rateLimitWithoutKnownCodeUsesStatus() {
         #expect(ErrorMessage.message(for: serverError(429, .unknown)) == "Too many attempts. Please try again in a moment.")
+        #expect(ErrorMessage.message(for: APIError.http(statusCode: 429)) == "Too many attempts. Please try again in a moment.")
+    }
+
+    @Test func responsesWithoutAnAPIErrorBodyAreGeneric() {
+        #expect(ErrorMessage.message(for: APIError.http(statusCode: 404)) == "Something went wrong. Please try again.")
+        #expect(ErrorMessage.message(for: APIError.http(statusCode: 502)) == "Something went wrong. Please try again.")
     }
 
     @Test func networkFailures() {
@@ -55,6 +61,19 @@ struct ErrorMessageTests {
         let body = try JSONDecoder.api().decode(ErrorResponse.self, from: Fixtures.errorJSON(status: 418, code: "BRAND_NEW_CODE"))
         #expect(body.code == .unknown)
         #expect(body.details == nil)
+    }
+
+    @Test func aStringCodeIsEnoughForAnAPIErrorBody() throws {
+        let body = try JSONDecoder.api().decode(ErrorResponse.self, from: Data(#"{"code":"GAME_NOT_FOUND","details":"x"}"#.utf8))
+        #expect(body.code == .gameNotFound)
+        #expect(body.details == nil)
+    }
+
+    @Test(arguments: [#"{"code":404}"#, #"{"code":null}"#, #"{"message":"Not Found"}"#, "<html>Not Found</html>", ""])
+    func bodiesWithoutAStringCodeAreNotAPIErrorBodies(_ body: String) {
+        #expect(throws: (any Error).self) {
+            try JSONDecoder.api().decode(ErrorResponse.self, from: Data(body.utf8))
+        }
     }
 
     @Test @MainActor func deleteAccountReportsAWrongPasswordAsIncorrectPassword() async {

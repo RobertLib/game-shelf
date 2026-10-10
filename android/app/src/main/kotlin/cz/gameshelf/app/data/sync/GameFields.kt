@@ -1,7 +1,12 @@
 package cz.gameshelf.app.data.sync
 
 import cz.gameshelf.app.data.api.ApiJson
+import cz.gameshelf.app.domain.model.CollectionStatus
+import cz.gameshelf.app.domain.model.Completeness
+import cz.gameshelf.app.domain.model.Condition
 import cz.gameshelf.app.domain.model.Game
+import cz.gameshelf.app.domain.model.GameFormat
+import cz.gameshelf.app.domain.model.PlayStatus
 import cz.gameshelf.app.domain.model.SaveGameRequest
 import cz.gameshelf.app.domain.model.toSaveRequest
 import kotlinx.serialization.descriptors.elementNames
@@ -36,15 +41,33 @@ object GameFields {
         return if (local.updatedAt > merged.updatedAt) merged.copy(updatedAt = local.updatedAt) else merged
     }
 
-    /** `PATCH games/{id}` body: [fields] of [game], cleared optional fields as explicit `null`. */
-    fun patchBody(game: Game, fields: Set<String>): JsonObject {
-        val request = game.toSaveRequest().toJson()
-        return JsonObject(request.filterKeys { it in fields })
-    }
+    /**
+     * `PATCH games/{id}` body: [fields] of [game], cleared optional fields as explicit `null`. A value this
+     * app version doesn't know is never sent back (see [knownValues]).
+     */
+    fun patchBody(game: Game, fields: Set<String>): JsonObject =
+        JsonObject(game.knownValues().filterKeys { it in fields })
 
     /** `POST games` body: every field of [game] plus its client-generated id. */
     fun createBody(game: Game): JsonObject =
-        JsonObject(mapOf("id" to JsonPrimitive(game.id)) + game.toSaveRequest().toJson())
+        JsonObject(mapOf("id" to JsonPrimitive(game.id)) + game.knownValues())
+
+    /**
+     * The fields of [this] game as a request, without those holding a value this app version doesn't know
+     * (decoded as `UNKNOWN`): the API would reject it, and the server has the real value anyway. The form
+     * never produces such a value and an edit saves only the fields the user changed, so this is a safeguard.
+     */
+    private fun Game.knownValues(): JsonObject {
+        val request = toSaveRequest()
+        val unknown = buildSet {
+            if (request.status == CollectionStatus.UNKNOWN) add(SaveGameRequest::status.name)
+            if (request.format == GameFormat.UNKNOWN) add(SaveGameRequest::format.name)
+            if (request.completeness == Completeness.UNKNOWN) add(SaveGameRequest::completeness.name)
+            if (request.condition == Condition.UNKNOWN) add(SaveGameRequest::condition.name)
+            if (request.playStatus == PlayStatus.UNKNOWN) add(SaveGameRequest::playStatus.name)
+        }
+        return JsonObject(request.toJson().filterKeys { it !in unknown })
+    }
 
     private fun Game.withFields(source: JsonObject, fields: Set<String>): Game {
         val json = toJson()

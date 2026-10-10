@@ -31,6 +31,10 @@ sealed interface SyncEvent {
 interface SyncController {
     val status: StateFlow<SyncStatus>
 
+    /**
+     * One-off events. Each is received once, by one collector, and waits until there is one: a run may
+     * report rejected changes before any screen shows (app start, a run in the background).
+     */
     val events: Flow<SyncEvent>
 
     /** Runs a sync soon (or once more after the running one); failures are retried automatically. */

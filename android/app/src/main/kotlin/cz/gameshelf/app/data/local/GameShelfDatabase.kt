@@ -11,6 +11,8 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import androidx.room.Upsert
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import cz.gameshelf.app.data.sync.PendingChange
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.builtins.ListSerializer
@@ -38,13 +40,17 @@ data class PendingChangeEntity(
     val queuedAt: Long,
 )
 
-/** Single row: whose data this is, where the change feed continues and when it last completed. */
+/**
+ * Single row: whose data this is, where the change feed continues, when it last completed and which app
+ * version (`versionCode`) stored the cursor – `null` for version 1, which did not record it.
+ */
 @Entity(tableName = "sync_state")
 data class SyncStateEntity(
     @PrimaryKey val id: Int = SINGLE_ROW_ID,
     val ownerUserId: String?,
     val cursor: String?,
     val lastSyncedAt: Long?,
+    val appVersion: Int?,
 ) {
     companion object {
         const val SINGLE_ROW_ID = 0
@@ -112,10 +118,14 @@ internal class FieldSetConverter {
     fun fromJson(json: String): Set<String> = Json.decodeFromString(serializer, json).toSet()
 }
 
-/** The offline copy of the collection plus the sync bookkeeping (offline-sync.md, "Local data"). */
+/**
+ * The offline copy of the collection plus the sync bookkeeping (offline-sync.md, "Local data").
+ * Every schema change comes with a [Migration] in [MIGRATIONS]: the local data holds unsynced changes,
+ * so it is never dropped.
+ */
 @Database(
     entities = [GameEntity::class, PendingChangeEntity::class, SyncStateEntity::class],
-    version = 1,
+    version = 2,
 )
 @TypeConverters(FieldSetConverter::class)
 abstract class GameShelfDatabase : RoomDatabase() {
@@ -124,7 +134,18 @@ abstract class GameShelfDatabase : RoomDatabase() {
     companion object {
         const val FILE_NAME = "game_shelf.db"
 
-        fun create(context: Context): GameShelfDatabase =
-            Room.databaseBuilder(context, GameShelfDatabase::class.java, FILE_NAME).build()
+        /** 1 → 2: `sync_state.appVersion`. Left `NULL`, so the first sync after the update pulls everything. */
+        val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE sync_state ADD COLUMN appVersion INTEGER")
+            }
+        }
+
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2)
+
+        fun create(context: Context, name: String = FILE_NAME): GameShelfDatabase =
+            Room.databaseBuilder(context, GameShelfDatabase::class.java, name)
+                .addMigrations(*MIGRATIONS)
+                .build()
     }
 }

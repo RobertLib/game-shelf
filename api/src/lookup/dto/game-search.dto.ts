@@ -1,12 +1,11 @@
 import { ApiProperty, ApiPropertyOptional, ApiSchema } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
+import { IsEnum, IsOptional, IsString } from 'class-validator';
+import { MaxChars, MinChars } from '../../common/char-length.decorator.js';
 import {
-  IsEnum,
-  IsOptional,
-  IsString,
-  MaxLength,
-  MinLength,
-} from 'class-validator';
+  COVER_URL_MAX_LENGTH,
+  COVER_URL_PATTERN,
+} from '../../common/cover-url.js';
 import { Platform } from '../../generated/prisma/enums.js';
 
 const nullableString = (maxLength: number, example: string) =>
@@ -23,8 +22,8 @@ export class GameSearchQueryDto {
     typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : value,
   )
   @IsString()
-  @MinLength(2)
-  @MaxLength(100)
+  @MinChars(2)
+  @MaxChars(100)
   q: string;
 
   @ApiPropertyOptional({
@@ -77,7 +76,13 @@ export class GameSearchResultDto {
   @ApiProperty({ type: 'integer', nullable: true, example: 2017 })
   releaseYear: number | null;
 
-  @ApiProperty({ type: String, format: 'uri', nullable: true })
+  @ApiProperty({
+    type: String,
+    format: 'uri',
+    nullable: true,
+    maxLength: COVER_URL_MAX_LENGTH,
+    pattern: COVER_URL_PATTERN,
+  })
   coverImageUrl: string | null;
 }
 

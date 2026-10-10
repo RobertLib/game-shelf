@@ -96,6 +96,10 @@ paths:
         - auth
   /api/v1/auth/refresh:
     post:
+      description: The refresh token is single-use. Repeating a refresh whose response
+        was lost, within 2 minutes (by default) and before the token it returned
+        is used, returns a new pair and invalidates the lost one. Any other
+        reuse of an old token revokes all sessions of the user.
       operationId: refreshTokens
       parameters: []
       requestBody:
@@ -134,6 +138,8 @@ paths:
         - auth
   /api/v1/auth/logout:
     post:
+      description: Also revokes the tokens it was already exchanged for, e.g. by a
+        refresh that raced the logout.
       operationId: logout
       parameters: []
       requestBody:
@@ -453,6 +459,7 @@ paths:
           in: query
           schema:
             minimum: 1
+            maximum: 1000000
             default: 1
             type: integer
         - name: pageSize
@@ -575,10 +582,12 @@ paths:
         - name: cursor
           required: false
           in: query
-          description: "`cursor` from the previous response. Omit it to get every game
-            from the beginning."
+          description: Opaque `cursor` from the previous response, sent back exactly as
+            received. Omit it to get every game from the beginning. A cursor
+            from before a restore of the server from a backup is answered with
+            410 SYNC_RESET_REQUIRED.
           schema:
-            example: "42"
+            example: 5f1d3c9a2b.42
             type: string
         - name: limit
           required: false
@@ -792,7 +801,10 @@ paths:
     get:
       description: "Looks the EAN / UPC up in external databases and returns details
         to prefill a new game with; nothing is saved. 404 `BARCODE_NOT_FOUND`:
-        the code is not known. 503 `LOOKUP_UNAVAILABLE`: the database cannot be
+        the code is not known (also when the check digit of a 12–14 digit code
+        is wrong). 429 `TOO_MANY_REQUESTS`: too many calls, or the user has used
+        up their daily number of lookups in the barcode database (results found
+        before do not count). 503 `LOOKUP_UNAVAILABLE`: the database cannot be
         reached or its daily limit is used up."
       operationId: lookupBarcode
       parameters:
@@ -988,8 +1000,10 @@ components:
         refreshToken:
           type: string
           description: Opaque single-use token for POST /auth/refresh. Every refresh
-            returns a new one; reusing an old token revokes all sessions of the
-            user.
+            returns a new one. Sending the previous token again shortly after (a
+            retry when the response was lost) returns a new pair as long as its
+            replacement is unused; any other reuse of an old token revokes all
+            sessions of the user.
         user:
           $ref: "#/components/schemas/User"
       required:
@@ -1424,9 +1438,9 @@ components:
             format: uuid
         cursor:
           type: string
-          description: Opaque position in the feed. Send it with the next call; store it
-            together with the data of this page.
-          example: "42"
+          description: Opaque position in the feed (do not parse it). Send it with the
+            next call; store it together with the data of this page.
+          example: 5f1d3c9a2b.42
         hasMore:
           type: boolean
           description: More changes are waiting; call again right away with the new cursor.
@@ -1517,6 +1531,8 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 1299.9
         purchaseDate:
           type: string
@@ -1532,13 +1548,18 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 2500
         currency:
           type: string
           minLength: 3
           maxLength: 3
+          pattern: ^[A-Za-z]{3}$
           default: CZK
-          description: ISO 4217 currency of purchasePrice and estimatedValue.
+          description: "Currency of purchasePrice and estimatedValue: 3 letters A–Z,
+            case-insensitive, stored upper-case. Usually an ISO 4217 code;
+            historic codes such as DEM or SKK are accepted too."
           example: CZK
         storageLocation:
           type: string
@@ -1559,6 +1580,8 @@ components:
           format: uri
           nullable: true
           maxLength: 2048
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
+          description: http(s) URL of ASCII characters; see `pattern`.
         notes:
           type: string
           nullable: true
@@ -1653,6 +1676,8 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 1299.9
         purchaseDate:
           type: string
@@ -1668,13 +1693,18 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 2500
         currency:
           type: string
           minLength: 3
           maxLength: 3
+          pattern: ^[A-Za-z]{3}$
           default: CZK
-          description: ISO 4217 currency of purchasePrice and estimatedValue.
+          description: "Currency of purchasePrice and estimatedValue: 3 letters A–Z,
+            case-insensitive, stored upper-case. Usually an ISO 4217 code;
+            historic codes such as DEM or SKK are accepted too."
           example: CZK
         storageLocation:
           type: string
@@ -1695,6 +1725,8 @@ components:
           format: uri
           nullable: true
           maxLength: 2048
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
+          description: http(s) URL of ASCII characters; see `pattern`.
         notes:
           type: string
           nullable: true
@@ -1781,6 +1813,8 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 1299.9
         purchaseDate:
           type: string
@@ -1796,12 +1830,17 @@ components:
           type: number
           nullable: true
           minimum: 0
+          maximum: 9999999999.99
+          description: At most 2 decimal places.
           example: 2500
         currency:
           type: string
           minLength: 3
           maxLength: 3
-          description: ISO 4217 currency of purchasePrice and estimatedValue.
+          pattern: ^[A-Za-z]{3}$
+          description: "Currency of purchasePrice and estimatedValue: 3 letters A–Z,
+            case-insensitive, stored upper-case. Usually an ISO 4217 code;
+            historic codes such as DEM or SKK are accepted too."
           example: CZK
         storageLocation:
           type: string
@@ -1821,6 +1860,8 @@ components:
           format: uri
           nullable: true
           maxLength: 2048
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
+          description: http(s) URL of ASCII characters; see `pattern`.
         notes:
           type: string
           nullable: true
@@ -1873,6 +1914,8 @@ components:
           type: string
           format: uri
           nullable: true
+          maxLength: 2048
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
         sources:
           description: Databases the details come from, to be shown as attribution.
           example:
@@ -1935,6 +1978,8 @@ components:
           type: string
           format: uri
           nullable: true
+          maxLength: 2048
+          pattern: ^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
       required:
         - igdbId
         - title

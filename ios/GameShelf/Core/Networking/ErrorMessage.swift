@@ -22,6 +22,8 @@ enum ErrorMessage {
         switch error {
         case .server(let statusCode, let code, let details):
             message(for: code, statusCode: statusCode, details: details)
+        case .http(let statusCode):
+            message(for: .unknown, statusCode: statusCode)
         case .network:
             network
         case .sessionExpired:

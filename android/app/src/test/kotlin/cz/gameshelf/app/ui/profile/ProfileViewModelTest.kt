@@ -12,7 +12,6 @@ import cz.gameshelf.app.data.api.dto.RegisterRequest
 import cz.gameshelf.app.data.auth.AuthRepository
 import cz.gameshelf.app.data.auth.SessionManager
 import cz.gameshelf.app.data.auth.SessionState
-import cz.gameshelf.app.data.auth.SessionStore
 import cz.gameshelf.app.data.auth.StoredSession
 import cz.gameshelf.app.data.sync.SyncStatus
 import cz.gameshelf.app.domain.model.ApiResult
@@ -20,6 +19,7 @@ import cz.gameshelf.app.domain.model.AppError
 import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.domain.model.User
 import cz.gameshelf.app.testing.FakeGamesRepository
+import cz.gameshelf.app.testing.FakeSessionStore
 import cz.gameshelf.app.testing.FakeSyncController
 import cz.gameshelf.app.testing.testGame
 import cz.gameshelf.app.ui.common.UiText
@@ -119,18 +119,6 @@ class ProfileViewModelTest {
         sync.status.value = SyncStatus(lastSyncedAt = Instant.parse("2026-10-07T12:00:00Z"))
         advanceUntilIdle()
         assertNull(viewModel.uiState.value.syncError)
-    }
-
-    private class FakeSessionStore(private var session: StoredSession?) : SessionStore {
-        override suspend fun load() = session
-
-        override suspend fun save(session: StoredSession) {
-            this.session = session
-        }
-
-        override suspend fun clear() {
-            session = null
-        }
     }
 
     private class FakeAuthApi(private val log: MutableList<String>) : AuthApi {

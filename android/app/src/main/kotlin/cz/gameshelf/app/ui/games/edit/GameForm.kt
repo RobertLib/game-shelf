@@ -1,3 +1,5 @@
+@file:UseSerializers(LocalDateSerializer::class)
+
 package cz.gameshelf.app.ui.games.edit
 
 import cz.gameshelf.app.domain.model.BarcodeLookup
@@ -11,10 +13,17 @@ import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.domain.model.PlayStatus
 import cz.gameshelf.app.domain.model.Region
 import cz.gameshelf.app.domain.model.SaveGameRequest
+import cz.gameshelf.app.domain.serialization.LocalDateSerializer
 import cz.gameshelf.app.ui.common.Formatters
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.UseSerializers
 import java.time.LocalDate
 
-/** Raw form input; text fields hold exactly what the user typed. Defaults follow the API. */
+/**
+ * Raw form input; text fields hold exactly what the user typed. Defaults follow the API.
+ * Serializable, so that it survives process death in the saved state.
+ */
+@Serializable
 data class GameForm(
     val title: String = "",
     val platform: Platform? = null,

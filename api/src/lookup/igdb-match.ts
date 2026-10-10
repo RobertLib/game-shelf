@@ -1,3 +1,4 @@
+import { isCoverUrl } from '../common/cover-url.js';
 import { Platform } from '../generated/prisma/enums.js';
 import { detectPlatform } from './product-title.js';
 
@@ -134,6 +135,9 @@ export function toGameDetails(game: IgdbGame): IgdbGameDetails {
   const releaseYear = game.first_release_date
     ? new Date(game.first_release_date * 1000).getUTCFullYear()
     : null;
+  const coverImageUrl = game.cover?.image_id
+    ? `https://images.igdb.com/igdb/image/upload/t_cover_big/${game.cover.image_id}.jpg`
+    : null;
   return {
     title: game.name.trim(),
     platforms: gamePlatforms(game),
@@ -144,9 +148,9 @@ export function toGameDetails(game: IgdbGame): IgdbGameDetails {
       releaseYear && releaseYear >= 1950 && releaseYear <= 2100
         ? releaseYear
         : null,
-    coverImageUrl: game.cover?.image_id
-      ? `https://images.igdb.com/igdb/image/upload/t_cover_big/${game.cover.image_id}.jpg`
-      : null,
+    // Only a URL the game can be saved with.
+    coverImageUrl:
+      coverImageUrl && isCoverUrl(coverImageUrl) ? coverImageUrl : null,
   };
 }
 

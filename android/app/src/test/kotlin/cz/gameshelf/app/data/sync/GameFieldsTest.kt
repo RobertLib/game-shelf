@@ -2,12 +2,14 @@ package cz.gameshelf.app.data.sync
 
 import cz.gameshelf.app.data.api.ApiJson
 import cz.gameshelf.app.domain.model.CollectionStatus
+import cz.gameshelf.app.domain.model.Condition
 import cz.gameshelf.app.domain.model.Game
 import cz.gameshelf.app.domain.model.toSaveRequest
 import cz.gameshelf.app.testing.FULL_GAME_JSON
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.math.BigDecimal
@@ -71,6 +73,18 @@ class GameFieldsTest {
         assertEquals(setOf("rating", "title"), body.keys)
         assertEquals(JsonNull, body["rating"])
         assertEquals(JsonPrimitive("Banjo"), body["title"])
+    }
+
+    @Test
+    fun `values unknown to this version are never sent`() {
+        val stored = game.copy(status = CollectionStatus.UNKNOWN, condition = Condition.UNKNOWN, title = "Banjo")
+
+        val patch = GameFields.patchBody(stored, setOf("title", "status", "condition"))
+        val create = GameFields.createBody(stored)
+
+        assertEquals(setOf("title"), patch.keys)
+        assertEquals(GameFields.ALL + "id" - "status" - "condition", create.keys)
+        assertFalse(JsonPrimitive("UNKNOWN") in create.values)
     }
 
     @Test

@@ -28,12 +28,12 @@ const products: Record<string, UpcProduct | Error> = {
   '711719541028': new LookupUnavailableError('EXCEED_LIMIT'),
 };
 const upcItemDb = {
-  lookup: (code: string) => {
+  lookup: vi.fn((code: string) => {
     const product = products[code];
     return product instanceof Error
       ? Promise.reject(product)
       : Promise.resolve(product ?? null);
-  },
+  }),
 };
 /** IGDB search results by query; the search itself is not stood in for. */
 const igdbGames: Record<string, IgdbGame[] | Error> = {
@@ -152,6 +152,29 @@ describe('Lookup (e2e)', () => {
   it('reports an unavailable database', async () => {
     const res = await lookup('711719541028').expect(503);
     expect(res.body.code).toBe('LOOKUP_UNAVAILABLE');
+  });
+
+  it('reports a code with a wrong check digit as unknown without asking', async () => {
+    upcItemDb.lookup.mockClear();
+    const res = await lookup('045496420056').expect(404);
+    expect(res.body.code).toBe('BARCODE_NOT_FOUND');
+    expect(upcItemDb.lookup).not.toHaveBeenCalled();
+  });
+
+  it('limits the lookups in the barcode database per user and day', async () => {
+    const collector = await registerUser(app);
+    await lookup('045496420055').expect(200);
+    // 20 by default; unknown codes count too, they were asked for.
+    for (let i = 0; i < 20; i++) {
+      await lookup(String(20_000_000 + i), collector).expect(404);
+    }
+    const res = await lookup('20000020', collector).expect(429);
+    expect(res.body.code).toBe('TOO_MANY_REQUESTS');
+
+    // Results found before are free, and other users have their own limit.
+    await lookup('20000000', collector).expect(404);
+    await lookup('045496420055', collector).expect(200);
+    await lookup('20000020', user).expect(404);
   });
 
   it('searches games by title', async () => {

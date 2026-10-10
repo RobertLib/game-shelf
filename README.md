@@ -40,8 +40,9 @@ A catalogue for collectors of computer and console games. A monorepo with three 
 
 ## Quick start
 
-You need Node.js ≥ 24, PostgreSQL (in Docker, or a local install such as Homebrew), JDK 17 and
-the Android SDK for Android, and Xcode 26+ for iOS.
+You need Node.js ≥ 24, PostgreSQL (in Docker, or a local install such as Homebrew), a JDK 17+ and
+the Android SDK for Android (Gradle downloads the JDK 25 its daemon runs on by itself, see
+[android/README.md](android/README.md)), and Xcode 26+ for iOS.
 
 ```bash
 make db             # PostgreSQL in Docker (without Docker see below)
@@ -99,6 +100,10 @@ In short:
 Errors always have the shape `{ statusCode, code, message, details? }`; the apps show their own
 messages based on `code`.
 
+The apps validate input with exactly the rules of the API (listed in
+[docs/mobile-spec.md](docs/mobile-spec.md#validation)): a game is saved on the device first, and a
+change the API rejected later would have to be undone.
+
 ## Barcode lookup
 
 The apps never call the external databases themselves; the API does (`api/src/lookup`) and caches
@@ -107,7 +112,10 @@ the answers in memory:
 - **UPCitemdb** turns the code into a shop listing ("Mario Kart 8 Deluxe - Nintendo Switch"), from
   which the API takes the title, platform, edition and region. Without configuration it uses the free
   trial endpoint: **100 lookups a day per server IP address**. For more, buy a plan and set
-  `UPCITEMDB_USER_KEY` in `api/.env`.
+  `UPCITEMDB_USER_KEY` in `api/.env`. So that one account can't use the quota up for everyone, each
+  user gets at most `UPCITEMDB_DAILY_LIMIT_PER_USER` (default 20) UPCitemdb lookups a day; answers
+  from the cache don't count, and codes with a wrong check digit are answered as unknown without
+  asking UPCitemdb.
 - **IGDB** (optional, free) adds genre, developer, publisher, release year and a cover. Register an
   application at [dev.twitch.tv/console](https://dev.twitch.tv/console) (a Twitch account with
   two-factor authentication; IGDB does not use the OAuth redirect URL, `http://localhost` will do),

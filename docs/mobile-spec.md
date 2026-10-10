@@ -21,7 +21,11 @@ Numbers, prices and dates are formatted with the **device locale** (prices alway
   Send `Authorization: Bearer <accessToken>`. On **401 from any authenticated call**, call `POST auth/refresh`
   with the refresh token (single-flight: concurrent 401s must share one refresh), store the new pair
   (refresh tokens are single-use and rotate) and retry the original request once. If refresh fails → clear the
-  session and show the sign-in screen.
+  session and show the sign-in screen. Apply the result of a refresh (new tokens or a rejection) only while the
+  session still holds the refresh token that was sent; a sign-out or a new sign-in during the refresh wins.
+  A network failure during a refresh keeps the session and the old refresh token: if the lost request did
+  reach the server, the API still accepts the old token for a short while (`REFRESH_TOKEN_REUSE_GRACE_SECONDS`,
+  2 minutes by default) as long as the successor it issued has not been used.
 - `POST auth/change-password` returns a new `AuthResponse` – store it (all other sessions are revoked).
 - `POST auth/logout { refreshToken }` on sign-out (ignore failures), then clear the local session.
 - `DELETE auth/me { password }` deletes the account (required by App Store guideline 5.1.1(v)).
@@ -70,10 +74,94 @@ Numbers, prices and dates are formatted with the **device locale** (prices alway
 | a synced change was rejected (see offline-sync.md) | Some changes were rejected by the server and have been undone. |
 | anything else | Something went wrong. Please try again. |
 
-Validate on the client before sending (same rules as the API): email format, password 8–128 chars,
-password confirmation must match, title required (≤200), platform required, release year 1950–2100,
-rating 1–10, quantity 1–999, prices ≥ 0 with max 2 decimals, barcode 8–14 digits, cover URL http(s),
-currency 3 letters (default CZK).
+## Validation
+
+The apps validate on the client with **exactly the rules of the API**. This matters: a game is saved
+locally first, and a change the API rejects later is undone by the sync engine (see
+[offline-sync.md](offline-sync.md)), so anything the form lets through must be accepted by the API.
+
+- Text is trimmed; a blank optional text is sent as `null`. **Lengths are counted in Unicode code
+  points** (Kotlin `codePointCount`, Swift `unicodeScalars.count`, JS `[...s].length`): `"😀"` is 1,
+  `"🇨🇿"` is 2, a decomposed `"é"` (`e` + U+0301) is 2.
+- Account: email format, password 8–128, display name ≤ 100, password confirmation must match.
+- Game:
+
+  | field | rule |
+  |---|---|
+  | title | required, ≤ 200 |
+  | platform | required |
+  | edition, genre, developer, publisher, purchase place, storage location | ≤ 100 |
+  | product code | ≤ 50 |
+  | notes | ≤ 5000 |
+  | barcode | 8–14 ASCII digits |
+  | release year | 1950–2100 |
+  | quantity | 1–999 |
+  | rating | 1–10 |
+  | purchase price, estimated value | 0 – 9 999 999 999.99, at most 2 decimal places (as typed: `1,500` is fine, `1,5000` is not) |
+  | currency | 3 letters A–Z (case-insensitive, stored upper-case; historic codes such as DEM or SKK are fine), default CZK |
+  | cover image URL | ≤ 2048 and matches the cover URL pattern below |
+
+- **Values the user did not change are not validated.** An edit sends only the changed fields, so a
+  value that came from the server (e.g. an enum value this app version doesn't know, shown as
+  "unknown") never blocks saving an edit of another field, and is never sent back.
+
+### Cover URL pattern
+
+ASCII only, identical on all three platforms (write character classes out, never `\d`, `\s` or `\S`,
+whose meaning differs between regex engines):
+
+```
+^[Hh][Tt][Tt][Pp][Ss]?://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?(:[0-9]{1,5})?([/?#][!-~]*)?$
+```
+
+| valid | invalid |
+|---|---|
+| `https://example.com/a.png` | `ftp://example.com/a.png` |
+| `HTTPS://Example.COM/A.png` | `example.com/a.png` |
+| `http://localhost/x.png` | `https://` |
+| `https://nas/cover.jpg` | `https://-example.com/a.png` |
+| `https://example.com:8443/a?b=c#d` | `https://example.com./a.png` |
+| `https://example.com?x=1` | `https://exa mple.com/a.png` |
+| `https://img.example.co.uk/a_b/%C3%A9.jpg` | `https://example.com/a b.png` |
+| | `https://example.com/é.png` |
+| | `https://user:pw@example.com/a.png` |
+| | `https://my_host/a.png` |
+| | `https://[::1]/a.png` |
+| | `https://example.com:123456/a.png` |
+
+### Decimal input
+
+Prices and the price filter bounds accept a decimal point or a decimal comma and grouping, the same
+way in every locale:
+
+1. Remove all whitespace (including no-break spaces U+00A0, U+202F and U+2009).
+2. What remains may only contain digits, `.` and `,`, with at least one digit.
+3. Find the decimal separator:
+   - both `.` and `,` occur → the one that occurs **last** is the decimal separator (it must occur
+     once); the other one is grouping;
+   - only one of them occurs, more than once → it is grouping (no decimals);
+   - only one of them occurs, once → it is the decimal separator, **unless exactly 3 digits follow it**,
+     then it is grouping (prices never have 3 decimals, so `1,500` and `1.500` are 1500).
+4. With grouping, the part before the decimal separator must be 1–3 digits, not starting with `0`,
+   followed by groups of exactly 3 digits (`12,345,678`); otherwise the input is invalid (so `0,500`
+   and `0.001` are invalid, not 500 and 1).
+5. Either the whole part or the decimal part may be empty, not both (`,5` = 0.5, `5,` = 5).
+6. "At most 2 decimal places" counts the decimal digits **as typed** (`1,50` is fine, `1,500` is
+   1500, `1,5000` has 4 decimal places).
+
+| input | value | | input | value |
+|---|---|---|---|---|
+| `1299.90` | 1299.90 | | `1,000` | 1000 |
+| `1299,9` | 1299.9 | | `2.500` | 2500 |
+| `1 299,90` | 1299.90 | | `1.234.567,89` | 1234567.89 |
+| `1,299.90` | 1299.90 | | `12,345,678` | 12345678 |
+| `1.299,90` | 1299.90 | | `,5` | 0.5 |
+| `1,5` | 1.5 | | `5,` | 5 |
+| `1,50` | 1.50 | | `1,5000` | 1.5000 (rejected: 4 decimals) |
+| `1.23,45` | invalid | | `1,2,3` | invalid |
+| `1.2.3` | invalid | | `.` | invalid |
+| `1,2.3` | invalid | | `12a` | invalid |
+| `0,500` | invalid | | `0.001` | invalid |
 
 ## Screens
 
@@ -290,3 +378,5 @@ Developer, Publisher, Release year, Barcode (EAN/UPC), Product code, Quantity, P
 Purchased from, Estimated value, Currency, Storage location, Rating, Favorite, Cover image URL, Notes.
 
 Unknown enum values coming from a newer API must not crash decoding (map to an "unknown"/OTHER fallback).
+They are never sent back (see Validation), and after an app update the collection is pulled again so
+that values the old version did not know are stored properly (see [offline-sync.md](offline-sync.md)).

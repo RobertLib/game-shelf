@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Env } from '../config/env.js';
 import type { Platform } from '../generated/prisma/enums.js';
@@ -24,7 +24,6 @@ const TOKEN_EXPIRY_MARGIN_MS = 5 * 60_000;
  */
 @Injectable()
 export class IgdbClient {
-  private readonly logger = new Logger(IgdbClient.name);
   private readonly credentials: { id: string; secret: string } | null;
   private token: { value: string; expiresAt: number } | null = null;
   private tokenRequest: Promise<string> | null = null;
@@ -37,23 +36,26 @@ export class IgdbClient {
 
   /**
    * Details of the game best matching a title, or `null` when there is no
-   * convincing match. Failures are logged, not thrown: IGDB only enriches lookups.
+   * convincing match or IGDB is not configured.
+   * @throws LookupUnavailableError when IGDB cannot answer.
    */
   async findGame(
     title: string,
     platform: Platform | null,
   ): Promise<IgdbGameDetails | null> {
     if (!this.credentials) return null;
+    let candidates: IgdbGame[];
     try {
-      const candidates = await this.query(
+      candidates = await this.query(
         `${searchClause(title)} fields ${IGDB_GAME_FIELDS}; limit 10;`,
       );
-      const game = pickBestMatch(candidates, title, platform);
-      return game ? toGameDetails(game) : null;
     } catch (e) {
-      this.logger.warn(`IGDB search for "${title}" failed: ${String(e)}`);
-      return null;
+      throw new LookupUnavailableError(
+        `IGDB search for "${title}" failed: ${String(e)}`,
+      );
     }
+    const game = pickBestMatch(candidates, title, platform);
+    return game ? toGameDetails(game) : null;
   }
 
   /**

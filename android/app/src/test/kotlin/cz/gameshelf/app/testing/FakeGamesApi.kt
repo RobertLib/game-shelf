@@ -145,3 +145,8 @@ fun httpError(status: Int, code: String): HttpException = HttpException(
         """{"statusCode":$status,"code":"$code","message":"$code"}""".toResponseBody("application/json".toMediaType()),
     ),
 )
+
+/** An HTTP failure whose body is not an API error body, e.g. an HTML page from a proxy or a firewall. */
+fun httpErrorWithBody(status: Int, body: String, mediaType: String = "text/html"): HttpException = HttpException(
+    Response.error<Any>(status, body.toResponseBody(mediaType.toMediaType())),
+)

@@ -109,40 +109,51 @@ struct GameDraft: Equatable {
 
     /// Validation messages per field. "Required" errors are only reported once the
     /// user tried to save, format errors immediately.
-    func errors(includingRequired: Bool) -> [Field: String] {
+    ///
+    /// Values the user did not change – equal to those in `initial`, the form's initial state – are not
+    /// validated: they came from the server, and an edit sends only the changed fields
+    /// (docs/mobile-spec.md, "Validation"). Required fields are always checked.
+    func errors(includingRequired: Bool, initial: GameDraft? = nil) -> [Field: String] {
         var errors: [Field: String] = [:]
-        func check(_ field: Field, _ message: String?) {
-            if let message { errors[field] = message }
+        func check(_ field: Field, _ value: KeyPath<GameDraft, String>, _ rule: (String) -> String?) {
+            guard self[keyPath: value] != initial?[keyPath: value], let message = rule(self[keyPath: value]) else { return }
+            errors[field] = message
+        }
+        func checkLength(_ field: Field, _ value: KeyPath<GameDraft, String>, _ limit: Int) {
+            check(field, value) { Validation.maxLength($0, limit) }
         }
 
-        if includingRequired || !title.isBlank {
-            check(.title, Validation.title(title))
+        if title.isBlank {
+            if includingRequired { errors[.title] = Validation.title(title) }
+        } else {
+            check(.title, \.title, Validation.title)
         }
         if includingRequired, platform == nil {
             errors[.platform] = "Choose a platform."
         }
-        check(.edition, Validation.maxLength(edition, 100))
-        check(.genre, Validation.maxLength(genre, 100))
-        check(.developer, Validation.maxLength(developer, 100))
-        check(.publisher, Validation.maxLength(publisher, 100))
-        check(.releaseYear, Validation.releaseYear(releaseYear))
-        check(.coverImageUrl, Validation.coverURL(coverImageUrl))
-        check(.barcode, Validation.barcode(barcode))
-        check(.productCode, Validation.maxLength(productCode, 50))
-        check(.storageLocation, Validation.maxLength(storageLocation, 100))
-        check(.purchasePrice, Validation.price(purchasePrice))
-        check(.estimatedValue, Validation.price(estimatedValue))
+        checkLength(.edition, \.edition, Validation.maxTextLength)
+        checkLength(.genre, \.genre, Validation.maxTextLength)
+        checkLength(.developer, \.developer, Validation.maxTextLength)
+        checkLength(.publisher, \.publisher, Validation.maxTextLength)
+        check(.releaseYear, \.releaseYear, Validation.releaseYear)
+        check(.coverImageUrl, \.coverImageUrl, Validation.coverURL)
+        check(.barcode, \.barcode, Validation.barcode)
+        checkLength(.productCode, \.productCode, Validation.maxProductCodeLength)
+        checkLength(.storageLocation, \.storageLocation, Validation.maxTextLength)
+        check(.purchasePrice, \.purchasePrice, Validation.price)
+        check(.estimatedValue, \.estimatedValue, Validation.price)
         if includingRequired || !currency.isBlank {
-            check(.currency, Validation.currency(currency))
+            check(.currency, \.currency, Validation.currency)
         }
-        check(.purchasePlace, Validation.maxLength(purchasePlace, 100))
-        check(.notes, Validation.maxLength(notes, 5000))
+        checkLength(.purchasePlace, \.purchasePlace, Validation.maxTextLength)
+        checkLength(.notes, \.notes, Validation.maxNotesLength)
         return errors
     }
 
-    /// The request to send, or `nil` while the draft is invalid.
-    func makeRequest() -> SaveGameRequest? {
-        guard errors(includingRequired: true).isEmpty, let platform else { return nil }
+    /// The request to send, or `nil` while the draft is invalid. `initial`: the form's initial state,
+    /// whose values are not validated again (see ``errors(includingRequired:initial:)``).
+    func makeRequest(initial: GameDraft? = nil) -> SaveGameRequest? {
+        guard errors(includingRequired: true, initial: initial).isEmpty, let platform else { return nil }
         return SaveGameRequest(
             title: title.trimmingCharacters(in: .whitespacesAndNewlines),
             platform: platform,

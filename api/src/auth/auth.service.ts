@@ -72,10 +72,7 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string): Promise<AuthResponseDto> {
-    const { userId, tokens } = await this.tokens.rotate(refreshToken);
-    const user = await this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-    });
+    const { user, tokens } = await this.tokens.rotate(refreshToken);
     return { ...tokens, user: UserDto.from(user) };
   }
 
@@ -138,7 +135,7 @@ export class AuthService {
   }
 
   private async respond(user: User): Promise<AuthResponseDto> {
-    const tokens = await this.tokens.issue(user.id);
+    const tokens = await this.tokens.issue(user);
     return { ...tokens, user: UserDto.from(user) };
   }
 }

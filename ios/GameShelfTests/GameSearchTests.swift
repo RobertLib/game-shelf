@@ -120,6 +120,23 @@ struct GameSearchViewModelTests {
         #expect(model.searchTerm == String(repeating: "a", count: 99))
     }
 
+    @Test func theSearchTermIsCutAtACodePointLikeTheAPICountsIt() {
+        // 98 + 2 emoji = 100 code points (102 UTF-16 units); the third emoji is cut off whole.
+        let model = GameSearchViewModel(query: String(repeating: "a", count: 98) + "😀😀😀", platform: nil)
+        #expect(model.searchTerm == String(repeating: "a", count: 98) + "😀😀")
+        #expect(model.searchTerm.unicodeScalars.count == 100)
+
+        // A flag is 2 code points: 99 letters leave room for its first half only.
+        let flag = GameSearchViewModel(query: String(repeating: "a", count: 99) + "🇨🇿", platform: nil)
+        #expect(flag.searchTerm.unicodeScalars.count == 100)
+        #expect(flag.searchTerm.unicodeScalars.last == "\u{1F1E8}")
+    }
+
+    @Test func twoCodePointsAreEnoughToSearch() {
+        #expect(GameSearchViewModel(query: "🇨🇿", platform: nil).content == .searching)
+        #expect(GameSearchViewModel(query: "😀", platform: nil).content == .prompt)
+    }
+
     @Test func reportsWhenNothingIsFound() async {
         let model = GameSearchViewModel(query: "qwertz", platform: nil)
 

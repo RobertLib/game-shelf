@@ -290,7 +290,7 @@ struct GameStoreTests {
         #expect(snapshot.lastSyncedAt == now)
     }
 
-    @Test func resetKeepsOnlyGamesWithPendingChanges() async throws {
+    @Test func startingOverKeepsOnlyGamesWithPendingChangesAndTheFirstPage() async throws {
         let (store, access) = try await makeStore()
         let plain = Fixtures.game("Plain")
         let updated = Fixtures.game("Updated")
@@ -298,9 +298,185 @@ struct GameStoreTests {
         try await pulled(updated, into: store, access: access)
         _ = try await edit(store, updated, access: access) { $0.rating = 3 }
 
-        let snapshot = try await store.resetForFullPull(access: access)
-        #expect(Set(snapshot.games.keys) == [updated.id])
-        #expect(try await store.cursor(access: access) == nil)
+        let fromFullPull = Fixtures.game("From the full pull")
+        let page = GameChanges(games: [fromFullPull], deletedIds: [], cursor: "1", hasMore: true)
+        let snapshot = try await store.applyChanges(page, at: now, startingOver: true, access: access)
+        #expect(Set(snapshot.games.keys) == [updated.id, fromFullPull.id])
+        #expect(snapshot.games[updated.id]?.rating == 3)
+        #expect(try await store.cursor(access: access) == "1")
         #expect(snapshot.pendingCount == 1)
+    }
+
+    // MARK: Database file
+
+    /// A database file in a fresh temporary directory, removed by `cleanUp`.
+    private func temporaryDatabase() throws -> (url: URL, cleanUp: () -> Void) {
+        let directory = FileManager.default.temporaryDirectory.appending(path: UUID().uuidString, directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return (directory.appending(path: "games.sqlite"), { try? FileManager.default.removeItem(at: directory) })
+    }
+
+    @Test func anAppUpdateForgetsTheCursorButKeepsGamesAndPendingChanges() async throws {
+        let (url, cleanUp) = try temporaryDatabase()
+        defer { cleanUp() }
+        let pulledGame = Fixtures.game("Pulled")
+        let unsynced = Fixtures.game("Unsynced")
+        do {
+            let store = try GameStore(url: url, appVersion: "1.0 (1)")
+            let (access, _) = try await store.activate(ownerID: owner)
+            try await pulled(pulledGame, into: store, access: access)
+            _ = try await store.insert(unsynced, at: now, access: access)
+        }
+        do {
+            // The same version continues from its cursor.
+            let store = try GameStore(url: url, appVersion: "1.0 (1)")
+            let (access, _) = try await store.activate(ownerID: owner)
+            #expect(try await store.cursor(access: access) == "1")
+        }
+
+        let updated = try GameStore(url: url, appVersion: "1.1 (2)")
+        let (access, snapshot) = try await updated.activate(ownerID: owner)
+        #expect(try await updated.cursor(access: access) == nil)
+        #expect(Set(snapshot.games.keys) == [pulledGame.id, unsynced.id])
+        #expect(try await updated.pendingChanges().map(\.gameID) == [unsynced.id])
+        #expect(snapshot.lastSyncedAt == now)
+
+        // A cursor stored by the new version is continued.
+        _ = try await updated.applyChanges(GameChanges(games: [], deletedIds: [], cursor: "7", hasMore: false), at: now, access: access)
+        let reopened = try GameStore(url: url, appVersion: "1.1 (2)")
+        let (reopenedAccess, _) = try await reopened.activate(ownerID: owner)
+        #expect(try await reopened.cursor(access: reopenedAccess) == "7")
+    }
+
+    @Test func migratesADatabaseOfSchemaVersion1() async throws {
+        let (url, cleanUp) = try temporaryDatabase()
+        defer { cleanUp() }
+        let game = Fixtures.game("Stored by an older version")
+        do {
+            let db = try SQLiteConnection(url: url)
+            try db.execute("""
+            PRAGMA journal_mode = WAL;
+            CREATE TABLE games (id TEXT PRIMARY KEY NOT NULL, data BLOB NOT NULL);
+            CREATE TABLE pending_changes (
+                game_id TEXT PRIMARY KEY NOT NULL,
+                kind TEXT NOT NULL CHECK (kind IN ('CREATE', 'UPDATE', 'DELETE')),
+                fields TEXT NOT NULL DEFAULT '[]',
+                revision INTEGER NOT NULL,
+                attempted INTEGER NOT NULL DEFAULT 0,
+                queued_at REAL NOT NULL
+            );
+            CREATE TABLE sync_state (id INTEGER PRIMARY KEY CHECK (id = 1), owner_user_id TEXT, cursor TEXT, last_synced_at REAL);
+            INSERT INTO sync_state (id) VALUES (1);
+            PRAGMA user_version = 1;
+            """)
+            try db.run(
+                "UPDATE sync_state SET owner_user_id = ?, cursor = '99', last_synced_at = ? WHERE id = 1",
+                [.text(owner), .real(now.timeIntervalSince1970)]
+            )
+            try db.run("INSERT INTO games (id, data) VALUES (?, ?)", [.text(game.id), .blob(JSONEncoder.api().encode(game))])
+            try db.run(
+                "INSERT INTO pending_changes (game_id, kind, fields, revision, queued_at) VALUES (?, 'UPDATE', '[\"notes\"]', 1, 0)",
+                [.text(game.id)]
+            )
+        }
+
+        let store = try GameStore(url: url)
+        let (access, snapshot) = try await store.activate(ownerID: owner)
+        #expect(snapshot.games[game.id] == game)
+        #expect(snapshot.lastSyncedAt == now)
+        #expect(!snapshot.hasUndoneRejectedChanges)
+        #expect(try await store.pendingChanges().map(\.fields) == [[.notes]])
+        // That version stored no app version with its cursor: the whole collection is pulled again.
+        #expect(try await store.cursor(access: access) == nil)
+        #expect(try SQLiteConnection(url: url).query("PRAGMA user_version") { $0.int(0) } == [2])
+    }
+
+    @Test func unreadableGamesAreNeverDroppedWithTheirPendingChanges() async throws {
+        let (url, cleanUp) = try temporaryDatabase()
+        defer { cleanUp() }
+        let synced = Fixtures.game("Synced")
+        let unsynced = Fixtures.game("Created offline")
+        do {
+            let store = try GameStore(url: url)
+            let (access, _) = try await store.activate(ownerID: owner)
+            try await pulled(synced, into: store, access: access)
+            _ = try await store.insert(unsynced, at: now, access: access)
+        }
+        // E.g. written by a newer app version that this one can't read.
+        try SQLiteConnection(url: url).run("UPDATE games SET data = ?", [.blob(Data(#"{"id":"?"}"#.utf8))])
+
+        let store = try GameStore(url: url)
+        let (access, snapshot) = try await store.activate(ownerID: owner)
+        #expect(snapshot.games.isEmpty)
+        #expect(snapshot.pendingCount == 1)
+        #expect(try await store.pendingChanges().map(\.gameID) == [unsynced.id])
+        // The synced game comes back with a full pull; the unsynced one stays stored as it is.
+        #expect(try await store.cursor(access: access) == nil)
+        #expect(try SQLiteConnection(url: url).query("SELECT id FROM games") { $0.text(0) } == [unsynced.id])
+    }
+
+    @Test func aDamagedDatabaseFileIsReplaced() async throws {
+        let (url, cleanUp) = try temporaryDatabase()
+        defer { cleanUp() }
+        try Data(repeating: 0x41, count: 8192).write(to: url)
+
+        let store = GameStore(openingOnFirstUse: url)
+        let (access, snapshot) = try await store.activate(ownerID: owner)
+        #expect(snapshot.games.isEmpty)
+        _ = try await store.insert(Fixtures.game("Doom"), at: now, access: access)
+        #expect(try await store.pendingChanges().count == 1)
+    }
+
+    @Test func aDatabaseThatCantBeOpenedIsKeptForTheNextAttempt() async throws {
+        let (url, cleanUp) = try temporaryDatabase()
+        defer { cleanUp() }
+        // Something at the database's path that can't be opened now – but isn't a damaged database.
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let marker = url.appending(path: "marker")
+        try Data("keep".utf8).write(to: marker)
+
+        let store = GameStore(openingOnFirstUse: url)
+        await #expect(throws: SQLiteError.self) {
+            _ = try await store.activate(ownerID: owner)
+        }
+        #expect(FileManager.default.fileExists(atPath: marker.path(percentEncoded: false)))
+
+        try FileManager.default.removeItem(at: url)
+        let (_, snapshot) = try await store.activate(ownerID: owner)
+        #expect(snapshot.games.isEmpty)
+    }
+
+    @Test func undoneRejectedChangesAreRememberedUntilSeen() async throws {
+        let (url, cleanUp) = try temporaryDatabase()
+        defer { cleanUp() }
+        do {
+            let store = try GameStore(url: url)
+            let (access, _) = try await store.activate(ownerID: owner)
+            let game = Fixtures.game("Rejected")
+            _ = try await store.insert(game, at: now, access: access)
+            let push = try #require(try await store.beginPush(of: game.id, access: access))
+            let completion = try await store.completePush(push, with: .rejected(restored: nil), access: access)
+            #expect(completion.snapshot.hasUndoneRejectedChanges)
+            #expect(completion.snapshot.games.isEmpty)
+        }
+        do {
+            // Shown also when the screen opens only after a restart.
+            let store = try GameStore(url: url)
+            let (access, snapshot) = try await store.activate(ownerID: owner)
+            #expect(snapshot.hasUndoneRejectedChanges)
+            #expect(try await !store.acknowledgeUndoneRejectedChanges(access: access).hasUndoneRejectedChanges)
+        }
+        let store = try GameStore(url: url)
+        #expect(try await !store.activate(ownerID: owner).1.hasUndoneRejectedChanges)
+    }
+
+    @Test func anotherUserDoesNotSeeTheUndoneRejectedChanges() async throws {
+        let (store, access) = try await makeStore()
+        let game = Fixtures.game("Rejected")
+        _ = try await store.insert(game, at: now, access: access)
+        let push = try #require(try await store.beginPush(of: game.id, access: access))
+        #expect(try await store.completePush(push, with: .rejected(restored: nil), access: access).snapshot.hasUndoneRejectedChanges)
+
+        #expect(try await !store.activate(ownerID: "user-2").1.hasUndoneRejectedChanges)
     }
 }

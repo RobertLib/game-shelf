@@ -1,6 +1,6 @@
 import Foundation
 
-/// Composition root: builds the object graph once at launch.
+/// Composition root: builds the object graph once per process, shared by all windows.
 @MainActor
 final class AppContainer {
     let session: SessionStore
@@ -44,6 +44,19 @@ final class AppContainer {
             barcodeLookup: RemoteBarcodeLookupService(api: api),
             gameSearch: RemoteGameSearchService(api: api)
         )
+    }
+
+    /// Starts what runs once per process, whichever windows are open: preparing the restored
+    /// session's data, ending an expired session and following the network.
+    func start() {
+        let session = session
+        let sync = sync
+        Task { await session.resumeSession() }
+        Task { await session.observeSessionExpiration() }
+        Task { await sync.observeNetwork() }
+        #if DEBUG
+        Task { await DebugLaunchOptions.current.autoLoginIfNeeded(session) }
+        #endif
     }
 
     /// Keychain items survive app deletion; a fresh install must not resurrect an old session.

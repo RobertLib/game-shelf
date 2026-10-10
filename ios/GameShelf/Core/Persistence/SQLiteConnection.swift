@@ -6,6 +6,12 @@ struct SQLiteError: Error, CustomStringConvertible {
     let message: String
 
     var description: String { "SQLite error \(code): \(message)" }
+
+    /// The file is damaged or not a database at all (`SQLITE_CORRUPT`, `SQLITE_NOTADB`), as opposed to
+    /// failures that may pass, such as a locked device, a full disk or a busy database.
+    var isCorruption: Bool {
+        [SQLITE_CORRUPT, SQLITE_NOTADB].contains(code & 0xFF)
+    }
 }
 
 /// A value bound to or read from a statement.

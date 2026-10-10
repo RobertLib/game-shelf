@@ -58,7 +58,8 @@ final class SessionStore {
     /// The local data is kept, so unsynced changes survive until the same user signs in again.
     func observeSessionExpiration() async {
         for await _ in tokens.sessionExpirations {
-            guard user != nil else { continue }
+            // A new session may have begun since (e.g. a password change); its user stays signed in.
+            guard user != nil, await tokens.accessToken == nil else { continue }
             state = .signedOut
             signOutNotice = ErrorMessage.sessionExpired
             await userData?.sessionDidExpire()
@@ -95,10 +96,13 @@ final class SessionStore {
     }
 
     /// Signs out and removes the collection from the device (unsynced changes are lost).
+    ///
+    /// The tokens go first, so a token refresh still in flight is ignored rather than ending the
+    /// session as "expired" or storing a new pair.
     func signOut() async {
         let refreshToken = await tokens.refreshToken
-        await userData?.userWillSignOut()
         await tokens.clear()
+        await userData?.userWillSignOut()
         state = .signedOut
         if let refreshToken {
             // Revoking the token is best effort; the local session is gone either way.
@@ -109,8 +113,8 @@ final class SessionStore {
 
     func deleteAccount(password: String) async throws {
         try await auth.deleteAccount(password: password)
-        await userData?.userWillSignOut()
         await tokens.clear()
+        await userData?.userWillSignOut()
         state = .signedOut
     }
 

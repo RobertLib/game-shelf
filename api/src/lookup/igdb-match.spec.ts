@@ -143,6 +143,15 @@ describe('toGameDetails', () => {
     expect(platforms).toEqual(['PC', 'PS4', 'PS5', 'XBOX_ONE', 'SWITCH']);
   });
 
+  it('leaves out a cover URL a game could not be saved with', () => {
+    const cover = (imageId: string) =>
+      toGameDetails({ id: 1, name: 'x', cover: { id: 1, image_id: imageId } })
+        .coverImageUrl;
+    expect(cover('co 213p')).toBeNull();
+    expect(cover('cö213p')).toBeNull();
+    expect(cover('a'.repeat(2048))).toBeNull();
+  });
+
   it('leaves out what IGDB does not know', () => {
     expect(toGameDetails({ id: 1, name: ' Doom ' })).toEqual({
       title: 'Doom',

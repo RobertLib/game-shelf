@@ -49,6 +49,7 @@ final class GameSearchViewModel {
         case failed(String)
     }
 
+    /// Lengths in code points, as the API counts them.
     static let minimumLength = 2
     /// The API's limit; a longer text is searched by its beginning.
     static let maximumLength = 100
@@ -76,15 +77,19 @@ final class GameSearchViewModel {
         self.debounce = debounce
     }
 
-    /// The text searched for: ``query`` trimmed and cut to ``maximumLength``.
+    /// The text searched for: ``query`` trimmed and cut to ``maximumLength`` code points (whole
+    /// scalars, so an emoji is never cut in half).
     var searchTerm: String {
-        String(query.trimmingCharacters(in: .whitespacesAndNewlines).prefix(Self.maximumLength))
+        String(query.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.prefix(Self.maximumLength))
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// The search term is long enough to be searched.
+    private var canSearch: Bool { searchTerm.codePointCount >= Self.minimumLength }
+
     var content: Content {
         let term = searchTerm
-        guard term.count >= Self.minimumLength else { return .prompt }
+        guard canSearch else { return .prompt }
         guard let answer else { return .searching }
         let isPending = isLoading || answer.term != term
         switch answer.outcome {
@@ -102,7 +107,7 @@ final class GameSearchViewModel {
     /// Runs whenever ``searchTerm`` changes, in a task that a newer term cancels (`.task(id:)`): searches
     /// once typing has paused. The text the screen opened with is searched right away.
     func searchTermChanged(using service: any GameSearchService) async {
-        if hasSearchedInitialQuery, searchTerm.count >= Self.minimumLength {
+        if hasSearchedInitialQuery, canSearch {
             do {
                 try await Task.sleep(for: debounce)
             } catch {
@@ -116,7 +121,7 @@ final class GameSearchViewModel {
     /// Searches ``searchTerm`` unless its answer is shown already; a text too short clears the results.
     func search(using service: any GameSearchService) async {
         let term = searchTerm
-        guard term.count >= Self.minimumLength else {
+        guard canSearch else {
             generation += 1
             isLoading = false
             answer = nil
@@ -128,7 +133,7 @@ final class GameSearchViewModel {
 
     func retry(using service: any GameSearchService) async {
         let term = searchTerm
-        guard term.count >= Self.minimumLength else { return }
+        guard canSearch else { return }
         await perform(term, using: service)
     }
 

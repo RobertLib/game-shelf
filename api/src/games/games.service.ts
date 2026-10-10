@@ -15,9 +15,11 @@ import {
 import {
   buildGameOrderBy,
   buildGameWhere,
+  TOMBSTONE_DATA,
   toGameData,
   toGamePatchData,
 } from './games.query.js';
+import { formatCursor, parseCursor } from './sync-cursor.js';
 
 const notFound = () =>
   new ApiException(
@@ -142,7 +144,7 @@ export class GamesService {
       await this.write(userId, (tx, version) =>
         tx.game.update({
           where: { id, userId, deletedAt: null },
-          data: { deletedAt: new Date(), version },
+          data: { ...TOMBSTONE_DATA, deletedAt: new Date(), version },
         }),
       );
     } catch (e) {
@@ -160,13 +162,19 @@ export class GamesService {
     userId: string,
     query: GameChangesQueryDto,
   ): Promise<GameChangesDto> {
-    const since = query.cursor === undefined ? 0 : Number(query.cursor);
-    const { gamesVersion } = await this.prisma.user.findUniqueOrThrow({
-      where: { id: userId },
-      select: { gamesVersion: true },
-    });
-    if (since > gamesVersion) {
-      // The cursor is from a newer state than the database, e.g. after a restore from a backup.
+    const cursor = parseCursor(query.cursor);
+    const since = cursor.version;
+    const { gamesVersion, syncEpoch } =
+      await this.prisma.user.findUniqueOrThrow({
+        where: { id: userId },
+        select: { gamesVersion: true, syncEpoch: true },
+      });
+    if (
+      (cursor.epoch !== null && cursor.epoch !== syncEpoch) ||
+      since > gamesVersion
+    ) {
+      // The cursor is from another state of the database, e.g. from before a restore from a
+      // backup (the epoch is replaced then) or from a newer state than the restored one.
       throw new ApiException(
         HttpStatus.GONE,
         ErrorCode.SYNC_RESET_REQUIRED,
@@ -185,7 +193,7 @@ export class GamesService {
         .filter((game) => !game.deletedAt)
         .map((game) => GameDto.from(game)),
       deletedIds: page.filter((game) => game.deletedAt).map((game) => game.id),
-      cursor: String(page.at(-1)?.version ?? since),
+      cursor: formatCursor(syncEpoch, page.at(-1)?.version ?? since),
       hasMore: rows.length > query.limit,
     };
   }

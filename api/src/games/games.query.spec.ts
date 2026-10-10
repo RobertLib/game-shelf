@@ -5,6 +5,8 @@ import { SaveGameDto, UpdateGameDto } from './dto/save-game.dto.js';
 import {
   buildGameOrderBy,
   buildGameWhere,
+  escapeLike,
+  TOMBSTONE_DATA,
   toGameData,
   toGamePatchData,
 } from './games.query.js';
@@ -58,6 +60,34 @@ describe('buildGameWhere', () => {
     expect(where.rating).toEqual({ gte: 7, lte: 9 });
   });
 
+  it('escapes LIKE wildcards in every text filter', () => {
+    expect(escapeLike('100%_off\\')).toBe('100\\%\\_off\\\\');
+    const where = buildGameWhere(
+      'u1',
+      parseQuery({
+        q: '50%',
+        genre: 'R_G\\',
+        publisher: 'a_b',
+        developer: '%',
+        storageLocation: 'x\\',
+      }),
+    );
+    expect(where.AND).toEqual([
+      {
+        OR: expect.arrayContaining([
+          { title: { contains: '50\\%', mode: 'insensitive' } },
+          { notes: { contains: '50\\%', mode: 'insensitive' } },
+        ]),
+      },
+      { OR: [{ genre: { equals: 'R\\_G\\\\', mode: 'insensitive' } }] },
+    ]);
+    expect(where).toMatchObject({
+      publisher: { contains: 'a\\_b', mode: 'insensitive' },
+      developer: { contains: '\\%', mode: 'insensitive' },
+      storageLocation: { contains: 'x\\\\', mode: 'insensitive' },
+    });
+  });
+
   it('parses booleans from query strings', () => {
     expect(
       buildGameWhere('u1', parseQuery({ favorite: 'false' })).favorite,
@@ -65,6 +95,32 @@ describe('buildGameWhere', () => {
     expect(buildGameWhere('u1', parseQuery({ hasCover: 'false' })).AND).toEqual(
       [{ coverImageUrl: null }],
     );
+  });
+});
+
+describe('ListGamesQueryDto', () => {
+  const invalid = (query: Record<string, unknown>) =>
+    validateSync(plainToInstance(ListGamesQueryDto, query)).map(
+      (error) => error.property,
+    );
+
+  it('bounds the page so that the offset always fits', () => {
+    expect(invalid({ page: '1000000', pageSize: '100' })).toEqual([]);
+    expect(invalid({ page: '1000001' })).toEqual(['page']);
+    expect(invalid({ page: '1e300' })).toEqual(['page']);
+  });
+
+  it('counts text lengths in code points', () => {
+    expect(invalid({ q: '😀'.repeat(200), genre: '🇨🇿'.repeat(50) })).toEqual(
+      [],
+    );
+    expect(
+      invalid({
+        q: '❤️'.repeat(101),
+        genre: ['RPG', '😀'.repeat(101)],
+        publisher: 'e\u0301'.repeat(51),
+      }),
+    ).toEqual(['q', 'genre', 'publisher']);
   });
 });
 
@@ -110,6 +166,19 @@ describe('toGameData', () => {
     });
     expect(validateSync(dto)).toEqual([]);
     expect(toGameData(dto).notes).toBeNull();
+  });
+});
+
+describe('TOMBSTONE_DATA', () => {
+  it('clears every optional field of a game', () => {
+    const cleared = Object.entries(
+      toGameData(
+        plainToInstance(SaveGameDto, { title: 'Doom', platform: 'PC' }),
+      ),
+    )
+      .filter(([, value]) => value === null)
+      .map(([field]) => field);
+    expect(Object.keys(TOMBSTONE_DATA).sort()).toEqual(cleared.sort());
   });
 });
 

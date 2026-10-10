@@ -20,7 +20,8 @@ final class SyncStatus {
     /// Message of the last failed run; cleared by a successful one.
     var lastErrorMessage: String?
     /// The engine undid changes the server rejected; the UI shows ``ErrorMessage/changesRejected``
-    /// once and resets it.
+    /// until the user has seen it (``GameRepository/acknowledgeUndoneRejectedChanges()``). It is
+    /// stored with the local data, so it is shown also when the screen opens only later.
     var hasUndoneRejectedChanges = false
 
     enum Indicator: Equatable {

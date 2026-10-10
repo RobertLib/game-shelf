@@ -2,9 +2,12 @@ package cz.gameshelf.app.ui.games.edit
 
 import android.app.Application
 import androidx.lifecycle.SavedStateHandle
+import app.cash.turbine.test
 import cz.gameshelf.app.R
 import cz.gameshelf.app.data.lookup.BarcodeLookupResult
 import cz.gameshelf.app.domain.model.AppError
+import cz.gameshelf.app.domain.model.CollectionStatus
+import cz.gameshelf.app.domain.model.Condition
 import cz.gameshelf.app.domain.model.GameSearchResult
 import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.domain.model.Region
@@ -233,6 +236,102 @@ class GameEditViewModelTest {
         assertNull(adding.uiState.value.form.platform)
         assertNull(adding.uiState.value.duplicate)
     }
+
+    @Test
+    fun `a value unknown to this version doesn't block saving an edit of another field`() = runTest {
+        val stored = testGame("1", title = "Doom").copy(status = CollectionStatus.UNKNOWN, condition = Condition.UNKNOWN)
+        repository.stored.value = listOf(stored)
+        val viewModel = viewModel("gameId" to "1")
+        advanceUntilIdle()
+
+        viewModel.events.test {
+            viewModel.updateForm { it.copy(title = "Doom II") }
+            viewModel.save()
+            advanceUntilIdle()
+
+            assertEquals(GameEditEvent.Close, awaitItem())
+        }
+        assertEquals(stored.copy(title = "Doom II"), repository.game("1"))
+    }
+
+    @Test
+    fun `an edit still reports problems with the values the user changed`() = runTest {
+        repository.stored.value = listOf(testGame("1", title = "Doom").copy(status = CollectionStatus.UNKNOWN))
+        val viewModel = viewModel("gameId" to "1")
+        advanceUntilIdle()
+
+        viewModel.updateForm { it.copy(coverImageUrl = "nas/cover.jpg") }
+        viewModel.save()
+        advanceUntilIdle()
+
+        assertEquals(setOf(GameField.COVER_URL), viewModel.uiState.value.errors.keys)
+        assertEquals("Doom", repository.game("1")?.title)
+    }
+
+    @Test
+    fun `an edit survives process death together with what counts as changed`() = runTest {
+        repository.stored.value = listOf(testGame("1", title = "Doom"))
+        val handle = SavedStateHandle(mapOf("gameId" to "1"))
+        val viewModel = GameEditViewModel(handle, repository, lookup, computeDispatcher = Dispatchers.Main)
+        advanceUntilIdle()
+        viewModel.updateForm { it.copy(title = "Doom II", notes = "Big box") }
+        advanceUntilIdle()
+
+        // The process is killed; the saved state is all that is left. A sync changed the game meanwhile.
+        repository.stored.value = listOf(testGame("1", title = "DOOM").copy(rating = 9))
+        val restored = GameEditViewModel(handle.copy(), repository, lookup, computeDispatcher = Dispatchers.Main)
+        advanceUntilIdle()
+
+        val state = restored.uiState.value
+        assertFalse(state.isLoading)
+        assertEquals("Doom II", state.form.title)
+        assertEquals("Big box", state.form.notes)
+        assertEquals("Doom", state.initialForm.title)
+        assertTrue(state.hasChanges)
+        restored.requestClose()
+        assertTrue(restored.uiState.value.showDiscardDialog)
+
+        restored.save()
+        advanceUntilIdle()
+        // Only the edited fields are saved; the rating the sync brought in stays.
+        val saved = repository.game("1")
+        assertEquals("Doom II", saved?.title)
+        assertEquals("Big box", saved?.notes)
+        assertEquals(9, saved?.rating)
+    }
+
+    @Test
+    fun `a new game survives process death without looking the barcode up again`() = runTest {
+        val handle = SavedStateHandle(mapOf("barcode" to MARIO_KART_LOOKUP.barcode))
+        GameEditViewModel(handle, repository, lookup, computeDispatcher = Dispatchers.Main)
+            .updateForm { it.copy(notes = "Gift") }
+        advanceUntilIdle()
+        lookup.lookedUp.clear()
+
+        val restored = GameEditViewModel(handle.copy(), repository, lookup, computeDispatcher = Dispatchers.Main)
+        advanceUntilIdle()
+
+        val state = restored.uiState.value
+        assertEquals("Mario Kart 8 Deluxe", state.form.title)
+        assertEquals("Gift", state.form.notes)
+        assertEquals(GameForm(), state.initialForm)
+        assertTrue(lookup.lookedUp.isEmpty())
+    }
+
+    @Test
+    fun `an unreadable saved form is ignored`() = runTest {
+        repository.stored.value = listOf(testGame("1", title = "Doom"))
+        val handle = SavedStateHandle(mapOf("gameId" to "1", "gameEditForm" to "{not json"))
+
+        val viewModel = GameEditViewModel(handle, repository, lookup, computeDispatcher = Dispatchers.Main)
+        advanceUntilIdle()
+
+        assertEquals("Doom", viewModel.uiState.value.form.title)
+        assertFalse(viewModel.uiState.value.hasChanges)
+    }
+
+    /** What survives process death: the saved state's values (all of them strings here). */
+    private fun SavedStateHandle.copy() = SavedStateHandle(keys().associateWith { get<Any>(it) })
 
     @Test
     fun `a pick cancels a barcode lookup in progress`() = runTest {

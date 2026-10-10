@@ -3,17 +3,21 @@ package cz.gameshelf.app.data.sync
 import android.app.Application
 import androidx.room.Room
 import cz.gameshelf.app.data.games.OfflineGamesRepository
+import cz.gameshelf.app.data.local.GameEntity
 import cz.gameshelf.app.data.local.GameShelfDatabase
 import cz.gameshelf.app.data.local.LocalGameStore
 import cz.gameshelf.app.data.local.SyncState
 import cz.gameshelf.app.data.sync.PendingChange.Kind
 import cz.gameshelf.app.domain.model.ApiResult
 import cz.gameshelf.app.domain.model.AppError
+import cz.gameshelf.app.domain.model.CollectionStatus
 import cz.gameshelf.app.domain.model.Platform
 import cz.gameshelf.app.domain.model.SaveGameRequest
+import cz.gameshelf.app.domain.model.toSaveRequest
 import cz.gameshelf.app.testing.FakeGamesApi
 import cz.gameshelf.app.testing.FakeGamesApi.Call
 import cz.gameshelf.app.testing.httpError
+import cz.gameshelf.app.testing.httpErrorWithBody
 import cz.gameshelf.app.testing.testGame
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -78,10 +82,13 @@ class SyncEngineTest {
      */
     private suspend fun TestScope.signedIn(): Harness {
         store.wipe(owner = USER)
-        val engine = SyncEngine(api, store, userId, connected, foreground, backgroundScope, LOCAL_CLOCK)
+        val engine = engine()
         val repository = OfflineGamesRepository(store, requestSync = {}, scope = backgroundScope, clock = LOCAL_CLOCK)
         return Harness(engine, repository)
     }
+
+    private fun TestScope.engine(appVersion: Int = APP_VERSION) =
+        SyncEngine(api, store, userId, connected, foreground, backgroundScope, appVersion, LOCAL_CLOCK)
 
     @Test
     fun `a created game is pushed and its pending change removed`() = runTest {
@@ -121,6 +128,35 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `a replayed create edited while in flight pushes only the remembered fields, in the same run`() = runTest {
+        val (engine, repository) = signedIn()
+        val game = repository.createGame(REQUEST)
+        api.afterCall = { if (it.name == "POST") throw IOException("response lost") }
+        engine.syncNow()
+        api.afterCall = {}
+        // Changed on another device since the first attempt; that change must survive.
+        api.putOnServer(api.serverGame(game.id)!!.copy(notes = "Edited elsewhere"))
+        repository.updateGame(game.id, REQUEST.copy(title = "Edited"))
+        api.calls.clear()
+
+        val gate = api.hold("POST")
+        val sync = async { engine.syncNow() }
+        gate.reached.await()
+        repository.updateGame(game.id, REQUEST.copy(title = "Edited", rating = 7))
+        gate.release.complete(Unit)
+
+        assertEquals(ApiResult.Success(Unit), sync.await())
+        assertEquals(listOf("POST", "PATCH", "changes"), api.calls.map { it.name })
+        assertEquals(setOf("title", "rating"), api.calls[1].fields)
+        val server = api.serverGame(game.id)!!
+        assertEquals("Edited", server.title)
+        assertEquals(7, server.rating)
+        assertEquals("Edited elsewhere", server.notes)
+        assertNull(store.pendingChange(game.id))
+        assertEquals(server, store.game(game.id))
+    }
+
+    @Test
     fun `a replayed create of a game deleted on another device meanwhile removes it`() = runTest {
         val (engine, repository) = signedIn()
         val game = repository.createGame(REQUEST)
@@ -155,6 +191,24 @@ class SyncEngineTest {
         assertNull(store.pendingChange(game.id))
         assertEquals("Edited", api.serverGame(game.id)?.title)
         assertEquals(true, api.serverGame(game.id)?.favorite)
+    }
+
+    @Test
+    fun `an edit of a game with a value unknown to this version sends only the edited field`() = runTest {
+        val (engine, repository) = signedIn()
+        val game = testGame("10000000-0000-4000-8000-000000000004")
+        api.putOnServer(game)
+        engine.syncNow()
+        // The server has a status this version doesn't know.
+        store.putGame(game.copy(status = CollectionStatus.UNKNOWN))
+        val opened = store.game(game.id)!!.toSaveRequest()
+        repository.updateGame(game.id, opened.copy(title = "Renamed"), base = opened)
+        api.calls.clear()
+
+        assertEquals(ApiResult.Success(Unit), engine.syncNow())
+
+        assertEquals(Call("PATCH", game.id, fields = setOf("title")), api.calls.first())
+        assertEquals(CollectionStatus.OWNED, api.serverGame(game.id)?.status)
     }
 
     @Test
@@ -261,6 +315,54 @@ class SyncEngineTest {
     }
 
     @Test
+    fun `a delete made while an update is rejected stays queued and is pushed`() = runTest {
+        val (engine, repository) = signedIn()
+        val game = repository.createGame(REQUEST)
+        engine.syncNow()
+        repository.updateGame(game.id, REQUEST.copy(title = "Rejected"))
+        val rejection = rejectNext("PATCH", httpError(400, "VALIDATION_FAILED"))
+
+        val sync = async { engine.syncNow() }
+        rejection.reached.await()
+        repository.deleteGame(game.id)
+        rejection.release.complete(Unit)
+
+        assertEquals(ApiResult.Success(Unit), sync.await())
+        assertNull(store.game(game.id))
+        assertEquals(Kind.DELETE, store.pendingChange(game.id)?.kind)
+
+        assertEquals(ApiResult.Success(Unit), engine.syncNow())
+        assertNull(api.serverGame(game.id))
+        assertNull(store.pendingChange(game.id))
+    }
+
+    @Test
+    fun `a delete made while a create is rejected stays queued and is pushed`() = runTest {
+        val (engine, repository) = signedIn()
+        val game = repository.createGame(REQUEST)
+        val events = mutableListOf<SyncEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { engine.events.toList(events) }
+        val rejection = rejectNext("POST", httpError(409, "CONFLICT"))
+
+        val sync = async { engine.syncNow() }
+        rejection.reached.await()
+        repository.deleteGame(game.id)
+        rejection.release.complete(Unit)
+
+        assertEquals(ApiResult.Success(Unit), sync.await())
+        assertNull(store.game(game.id))
+        assertEquals(Kind.DELETE, store.pendingChange(game.id)?.kind)
+        // Nothing the user sees was undone: they deleted the game themselves.
+        assertEquals(emptyList<SyncEvent>(), events)
+
+        api.calls.clear()
+        assertEquals(ApiResult.Success(Unit), engine.syncNow())
+        // The server never had the game: 404 GAME_NOT_FOUND counts as deleted.
+        assertEquals(Call("DELETE", game.id), api.calls.first())
+        assertNull(store.pendingChange(game.id))
+    }
+
+    @Test
     fun `a rejected create removes the game`() = runTest {
         val (engine, repository) = signedIn()
         val game = repository.createGame(REQUEST)
@@ -270,6 +372,96 @@ class SyncEngineTest {
 
         assertNull(store.game(game.id))
         assertNull(store.pendingChange(game.id))
+    }
+
+    @Test
+    fun `an unknown error code from the API is a permanent rejection`() = runTest {
+        val (engine, repository) = signedIn()
+        val game = repository.createGame(REQUEST)
+        engine.syncNow()
+        repository.updateGame(game.id, REQUEST.copy(title = "Rejected"))
+        api.beforeCall = { if (it.name == "PATCH") throw httpError(422, "SOMETHING_NEW") }
+
+        assertEquals(ApiResult.Success(Unit), engine.syncNow())
+
+        assertEquals(REQUEST.title, store.game(game.id)?.title)
+        assertNull(store.pendingChange(game.id))
+    }
+
+    @Test
+    fun `responses without an API error body, and 408, are temporary and undo nothing`() = runTest {
+        val (engine, repository) = signedIn()
+        val game = repository.createGame(REQUEST)
+        engine.syncNow()
+        repository.updateGame(game.id, REQUEST.copy(title = "Edited"))
+        api.calls.clear()
+
+        listOf(
+            httpErrorWithBody(403, "<html><body>Blocked by the firewall</body></html>"),
+            httpErrorWithBody(404, "Not Found", "text/plain"),
+            httpErrorWithBody(400, """{"error":"bad request"}""", "application/json"),
+            httpError(408, "REQUEST_TIMEOUT"),
+        ).forEach { failure ->
+            api.beforeCall = { if (it.name == "PATCH") throw failure }
+
+            val result = engine.syncNow()
+
+            assertTrue(result is ApiResult.Failure)
+            assertEquals("Edited", store.game(game.id)?.title)
+            assertEquals(Kind.UPDATE, store.pendingChange(game.id)?.kind)
+        }
+        assertTrue(api.calls.none { it.name == "GET" })
+
+        api.beforeCall = {}
+        assertEquals(ApiResult.Success(Unit), engine.syncNow())
+        assertEquals("Edited", api.serverGame(game.id)?.title)
+    }
+
+    @Test
+    fun `a 404 counts as deleted only with GAME_NOT_FOUND`() = runTest {
+        val (engine, repository) = signedIn()
+        val edited = repository.createGame(REQUEST)
+        val deleted = repository.createGame(REQUEST.copy(title = "Second"))
+        engine.syncNow()
+
+        // A misrouted request: says nothing about the game.
+        repository.deleteGame(deleted.id)
+        api.beforeCall = { if (it.name == "DELETE") throw httpErrorWithBody(404, "<html>Not found</html>") }
+        assertTrue(engine.syncNow() is ApiResult.Failure)
+        assertEquals(Kind.DELETE, store.pendingChange(deleted.id)?.kind)
+
+        // Another code from the API is a rejection like any other 4xx: the delete is undone.
+        api.beforeCall = { if (it.name == "DELETE") throw httpError(404, "NOT_FOUND") }
+        assertEquals(ApiResult.Success(Unit), engine.syncNow())
+        assertNull(store.pendingChange(deleted.id))
+        assertEquals(api.serverGame(deleted.id), store.game(deleted.id))
+
+        // The same for an update: the game is not removed.
+        repository.updateGame(edited.id, REQUEST.copy(title = "Edited"))
+        api.beforeCall = { if (it.name == "PATCH") throw httpErrorWithBody(404, "Not Found", "text/plain") }
+        assertTrue(engine.syncNow() is ApiResult.Failure)
+        assertEquals("Edited", store.game(edited.id)?.title)
+        assertEquals(Kind.UPDATE, store.pendingChange(edited.id)?.kind)
+    }
+
+    @Test
+    fun `a pending change of a game missing locally is a temporary local error`() = runTest {
+        val (engine, _) = signedIn()
+        val created = "10000000-0000-4000-8000-000000000005"
+        store.putPendingChange(PendingChange.create(created, LOCAL_TIME.toEpochMilli()))
+
+        assertEquals(ApiResult.Failure(AppError.Unexpected), engine.syncNow())
+        assertEquals(PendingChange.create(created, LOCAL_TIME.toEpochMilli()), store.pendingChange(created))
+
+        // A stored game this version cannot read is missing as well.
+        store.removePendingChange(created)
+        val edited = "10000000-0000-4000-8000-000000000006"
+        database.dao().upsertGame(GameEntity(edited, """{"id":"$edited","title":"Unreadable"}"""))
+        store.putPendingChange(PendingChange(edited, Kind.UPDATE, setOf("title"), queuedAt = LOCAL_TIME.toEpochMilli()))
+
+        assertEquals(ApiResult.Failure(AppError.Unexpected), engine.syncNow())
+        assertEquals(Kind.UPDATE, store.pendingChange(edited)?.kind)
+        assertEquals(emptyList<String>(), api.calls.map { it.name })
     }
 
     @Test
@@ -337,6 +529,98 @@ class SyncEngineTest {
         assertNull(store.game(vanished.id))
         assertNotNull(store.game(created.id))
         assertEquals(Kind.CREATE, store.pendingChange(created.id)?.kind)
+    }
+
+    @Test
+    fun `a malformed cursor is treated like a reset`() = runTest {
+        val (engine, _) = signedIn()
+        val kept = testGame("10000000-0000-4000-8000-000000000001")
+        api.putOnServer(kept)
+        engine.syncNow()
+        api.calls.clear()
+        api.beforeCall = { if (it.name == "changes" && it.cursor != null) throw httpError(400, "VALIDATION_FAILED") }
+
+        assertEquals(ApiResult.Success(Unit), engine.syncNow())
+
+        assertEquals(listOf("1", null), api.calls.filter { it.name == "changes" }.map { it.cursor })
+        assertEquals(kept, store.game(kept.id))
+        assertEquals("1", store.syncState().cursor)
+    }
+
+    @Test
+    fun `a change feed error without an API error body never resets`() = runTest {
+        val (engine, _) = signedIn()
+        val kept = testGame("10000000-0000-4000-8000-000000000001")
+        api.putOnServer(kept)
+        engine.syncNow()
+        api.forgetOnServer(kept.id)
+        api.beforeCall = { if (it.name == "changes") throw httpErrorWithBody(410, "<html>Gone</html>") }
+
+        assertEquals(ApiResult.Failure(AppError.Http(410)), engine.syncNow())
+
+        assertEquals(kept, store.game(kept.id))
+        assertEquals("1", store.syncState().cursor)
+    }
+
+    @Test
+    fun `after an app update the next run pulls everything again and keeps the local data`() = runTest {
+        val (oldVersion, repository) = signedIn()
+        val synced = testGame("10000000-0000-4000-8000-000000000001", title = "Synced")
+        val edited = testGame("10000000-0000-4000-8000-000000000002", title = "Edited elsewhere")
+        api.putOnServer(synced)
+        api.putOnServer(edited)
+        oldVersion.syncNow()
+        assertEquals(APP_VERSION, store.syncState().appVersion)
+        // The old version stored a status it didn't know as its fallback.
+        store.putGame(synced.copy(status = CollectionStatus.UNKNOWN))
+        val localOnly = testGame("10000000-0000-4000-8000-000000000003")
+        store.putGame(localOnly)
+        repository.updateGame(edited.id, edited.toSaveRequest().copy(rating = 8))
+        api.calls.clear()
+
+        val updated = engine(appVersion = APP_VERSION + 1)
+        assertEquals(ApiResult.Success(Unit), updated.syncNow())
+
+        assertEquals(listOf("PATCH", "changes"), api.calls.map { it.name })
+        assertEquals(listOf<String?>(null), api.calls.filter { it.name == "changes" }.map { it.cursor })
+        assertEquals(CollectionStatus.OWNED, store.game(synced.id)?.status)
+        assertEquals(8, store.game(edited.id)?.rating)
+        assertEquals(localOnly, store.game(localOnly.id))
+        assertEquals(APP_VERSION + 1, store.syncState().appVersion)
+
+        api.calls.clear()
+        updated.syncNow()
+        assertNotNull(api.calls.single { it.name == "changes" }.cursor)
+    }
+
+    @Test
+    fun `a rejection waits for someone to report it to, and is reported once`() = runTest {
+        val (engine, repository) = signedIn()
+        api.beforeCall = { if (it.name == "POST") throw httpError(409, "CONFLICT") }
+        repository.createGame(REQUEST)
+        engine.syncNow()
+        repository.createGame(REQUEST.copy(title = "Second"))
+        engine.syncNow()
+
+        // Nobody listened during the runs (e.g. at app start); the list screen subscribes only now.
+        val events = mutableListOf<SyncEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { engine.events.toList(events) }
+
+        assertEquals(listOf(SyncEvent.ChangesRejected), events)
+    }
+
+    @Test
+    fun `an unreported rejection is dropped with the local data`() = runTest {
+        val (engine, repository) = signedIn()
+        api.beforeCall = { if (it.name == "POST") throw httpError(409, "CONFLICT") }
+        repository.createGame(REQUEST)
+        engine.syncNow()
+
+        engine.clearUserData()
+
+        val events = mutableListOf<SyncEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { engine.events.toList(events) }
+        assertEquals(emptyList<SyncEvent>(), events)
     }
 
     @Test
@@ -450,6 +734,24 @@ class SyncEngineTest {
         retry.release.complete(Unit)
     }
 
+    private class Rejection {
+        val reached = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+    }
+
+    /** Holds the next call named [name] until released, then fails it with [failure]. */
+    private fun rejectNext(name: String, failure: Exception): Rejection {
+        val rejection = Rejection()
+        api.beforeCall = { call ->
+            if (call.name == name && !rejection.reached.isCompleted) {
+                rejection.reached.complete(Unit)
+                rejection.release.await()
+                throw failure
+            }
+        }
+        return rejection
+    }
+
     @Test
     fun `backoff doubles from 2 seconds up to 5 minutes`() {
         assertEquals(
@@ -459,6 +761,7 @@ class SyncEngineTest {
     }
 
     private companion object {
+        const val APP_VERSION = 7
         const val USER = "user-1"
         const val OTHER_USER = "user-2"
         val SERVER_TIME: Instant = Instant.parse("2026-10-07T10:00:00Z")

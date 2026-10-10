@@ -10,9 +10,9 @@ import {
   IsOptional,
   IsString,
   Max,
-  MaxLength,
   Min,
 } from 'class-validator';
+import { MaxChars } from '../../common/char-length.decorator.js';
 import { ToArray, ToBoolean } from '../../common/transforms.js';
 import {
   CollectionStatus,
@@ -41,6 +41,8 @@ export const SortOrder = { asc: 'asc', desc: 'desc' } as const;
 export type SortOrder = (typeof SortOrder)[keyof typeof SortOrder];
 
 export const MAX_PAGE_SIZE = 100;
+/** Keeps the offset `(page - 1) * pageSize` well within a 32-bit integer. */
+export const MAX_PAGE = 1_000_000;
 
 const multi = (description: string) => ({
   isArray: true,
@@ -56,7 +58,7 @@ export class ListGamesQueryDto {
   })
   @IsOptional()
   @IsString()
-  @MaxLength(200)
+  @MaxChars(200)
   q?: string;
 
   @ApiPropertyOptional({
@@ -136,7 +138,7 @@ export class ListGamesQueryDto {
   @ToArray()
   @IsOptional()
   @IsString({ each: true })
-  @MaxLength(100, { each: true })
+  @MaxChars(100, { each: true })
   genre?: string[];
 
   @ApiPropertyOptional({
@@ -144,7 +146,7 @@ export class ListGamesQueryDto {
   })
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   publisher?: string;
 
   @ApiPropertyOptional({
@@ -152,7 +154,7 @@ export class ListGamesQueryDto {
   })
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   developer?: string;
 
   @ApiPropertyOptional({
@@ -160,7 +162,7 @@ export class ListGamesQueryDto {
   })
   @IsOptional()
   @IsString()
-  @MaxLength(100)
+  @MaxChars(100)
   storageLocation?: string;
 
   @ApiPropertyOptional({
@@ -272,11 +274,17 @@ export class ListGamesQueryDto {
   @IsIn(Object.values(SortOrder))
   order: SortOrder = SortOrder.asc;
 
-  @ApiPropertyOptional({ type: 'integer', minimum: 1, default: 1 })
+  @ApiPropertyOptional({
+    type: 'integer',
+    minimum: 1,
+    maximum: MAX_PAGE,
+    default: 1,
+  })
   @Type(() => Number)
   @IsOptional()
   @IsInt()
   @Min(1)
+  @Max(MAX_PAGE)
   page: number = 1;
 
   @ApiPropertyOptional({
